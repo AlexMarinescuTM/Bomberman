@@ -29,7 +29,11 @@ export function useBombermanGame() {
   const [player, setPlayer] = useState<Pos>({ x: 1, y: 1 });
   const [enemies, setEnemies] = useState<Enemy[]>(() => makeEnemies(initialGridRef.current!));
   const [bombs, setBombs] = useState<Bomb[]>([]);
+  // maxBombs is the capacity ceiling ever earned (grows from pickups); bombsAvailable is
+  // the ammo you can actually spend right now — it only drops when you place a bomb and
+  // only rises from pickups, so a bomb detonating never hands a "slot" back on its own.
   const [maxBombs, setMaxBombs] = useState(STARTING_MAX_BOMBS);
+  const [bombsAvailable, setBombsAvailable] = useState(STARTING_MAX_BOMBS);
   const [pickups, setPickups] = useState<Pickup[]>([]);
   const [explosions, setExplosions] = useState<Explosion[]>([]);
   const [particles, setParticles] = useState<Particle[]>([]);
@@ -45,8 +49,8 @@ export function useBombermanGame() {
   statusRef.current = status;
   const bombsRef = useRef(bombs);
   bombsRef.current = bombs;
-  const maxBombsRef = useRef(maxBombs);
-  maxBombsRef.current = maxBombs;
+  const bombsAvailableRef = useRef(bombsAvailable);
+  bombsAvailableRef.current = bombsAvailable;
 
   // --- movement: held direction keys drive a fixed-tick walk, same cadence style as
   // enemies, but the first step of a press fires immediately (no tick to wait out) so
@@ -94,13 +98,12 @@ export function useBombermanGame() {
 
   const placeBomb = useCallback(() => {
     if (statusRef.current !== "playing") return;
+    if (bombsAvailableRef.current <= 0) return;
     const p = playerRef.current;
-    setBombs((bs) => {
-      if (bs.some((b) => b.x === p.x && b.y === p.y)) return bs;
-      if (bs.length >= maxBombsRef.current) return bs;
-      idCounter.current += 1;
-      return [...bs, { x: p.x, y: p.y, id: idCounter.current, placedAt: Date.now() }];
-    });
+    if (bombsRef.current.some((b) => b.x === p.x && b.y === p.y)) return;
+    idCounter.current += 1;
+    setBombs((bs) => [...bs, { x: p.x, y: p.y, id: idCounter.current, placedAt: Date.now() }]);
+    setBombsAvailable((n) => n - 1);
   }, []);
 
   // --- keyboard: movement keys step immediately and then auto-repeat while held; space places a bomb ---
@@ -387,6 +390,7 @@ export function useBombermanGame() {
     const hit = pickups.find((pk) => pk.x === player.x && pk.y === player.y);
     if (!hit) return;
     setMaxBombs((m) => m + 1);
+    setBombsAvailable((n) => n + 1);
     setPickups((ps) => ps.filter((pk) => pk.id !== hit.id));
   }, [player, pickups, status]);
 
@@ -405,6 +409,7 @@ export function useBombermanGame() {
     setEnemies(makeEnemies(newGrid));
     setBombs([]);
     setMaxBombs(STARTING_MAX_BOMBS);
+    setBombsAvailable(STARTING_MAX_BOMBS);
     setPickups([]);
     setExplosions([]);
     setLives(3);
@@ -417,6 +422,7 @@ export function useBombermanGame() {
     enemies,
     bombs,
     maxBombs,
+    bombsAvailable,
     pickups,
     explosions,
     particles,

@@ -10,6 +10,7 @@ export default function Bomberman() {
     enemies,
     bombs,
     maxBombs,
+    bombsAvailable,
     pickups,
     explosions,
     particles,
@@ -63,7 +64,7 @@ export default function Bomberman() {
           Enemies left: {enemies.filter((e) => e.alive).length}
         </div>
         <div style={{ fontSize: 13, opacity: 0.7 }}>
-          Bombs: {bombs.length}/{maxBombs}
+          Bombs: {bombsAvailable}/{maxBombs}
         </div>
       </div>
 
