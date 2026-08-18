@@ -19,7 +19,6 @@ import type {
   DeathCause,
   Enemy,
   Explosion,
-  ExplosionCell,
   Particle,
   Pickup,
   PlayerDeath,
@@ -33,6 +32,8 @@ import {
   crateVariantFor,
 } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
+import { chooseEnemyMove } from "./enemyAI";
+import { RIPPLE_STEP, clearCrates, computeBlast } from "./blast";
 
 export function useBombermanGame() {
   const initialGridRef = useRef<CellType[][] | null>(null);
@@ -184,21 +185,6 @@ export function useBombermanGame() {
     if (status !== "playing") stopRepeat();
   }, [status, stopRepeat]);
 
-  // --- bomb fuse -> explosion ---
-  useEffect(() => {
-    if (bombs.length === 0) return;
-    const t = setInterval(() => {
-      const now = Date.now();
-      setBombs((bs) => {
-        const ready = bs.filter((b) => now - b.placedAt >= BOMB_FUSE_MS);
-        if (ready.length === 0) return bs;
-        ready.forEach((b) => detonate(b.x, b.y));
-        return bs.filter((b) => now - b.placedAt < BOMB_FUSE_MS);
-      });
-    }, 100);
-    return () => clearInterval(t);
-  }, [bombs.length]);
-
   // Starts the death animation. The heart is spent immediately (so the HUD
   // reacts at the moment of impact), but respawn / game-over is deferred until
   // the animation finishes -- see the death sweeper effect below.
@@ -214,31 +200,17 @@ export function useBombermanGame() {
   }, []);
 
   const detonate = useCallback((bx: number, by: number) => {
-    const RIPPLE_STEP = 65; // ms between each ring of the blast igniting
-    const cells: ExplosionCell[] = [{ x: bx, y: by, delay: 0, wasBrick: false }];
-    const dirs = [
-      { dx: 1, dy: 0 },
-      { dx: -1, dy: 0 },
-      { dx: 0, dy: 1 },
-      { dx: 0, dy: -1 },
-    ];
-    setGrid((g) => {
-      const ng = g.map((row) => [...row]);
-      dirs.forEach(({ dx, dy }) => {
-        for (let i = 1; i <= BLAST_RANGE; i++) {
-          const x = bx + dx * i;
-          const y = by + dy * i;
-          if (ng[y]?.[x] === undefined || ng[y][x] === "wall") break;
-          const wasBrick = ng[y][x] === "brick";
-          cells.push({ x, y, delay: i * RIPPLE_STEP, wasBrick });
-          if (wasBrick) {
-            ng[y][x] = "empty";
-            break;
-          }
-        }
-      });
-      return ng;
-    });
+    // Footprint first, as a pure computation off the live grid -- see blast.ts
+    // for why this must not happen inside a state updater.
+    const { cells, destroyed } = computeBlast(gridRef.current, bx, by);
+
+    if (destroyed.length > 0) {
+      // Keep the ref in step synchronously so a second bomb detonating in this
+      // same tick sees the crates this one just cleared.
+      const nextGrid = clearCrates(gridRef.current, destroyed);
+      gridRef.current = nextGrid;
+      setGrid(nextGrid);
+    }
 
     idCounter.current += 1;
     const expId = idCounter.current;
@@ -442,31 +414,49 @@ export function useBombermanGame() {
     setPickups(nextPickups);
   }, []);
 
-  // --- enemy AI: random walk ---
+  // --- bomb fuse -> explosion ---
+  // detonate() is deliberately called outside any state updater: updaters must be
+  // pure, and StrictMode double-invokes them, which previously fired every blast
+  // twice. Ready bombs are pulled from the ref and cleared synchronously so the
+  // next 100ms tick can't detonate the same bomb again.
+  useEffect(() => {
+    if (bombs.length === 0) return;
+    const t = setInterval(() => {
+      const now = Date.now();
+      const ready = bombsRef.current.filter((b) => now - b.placedAt >= BOMB_FUSE_MS);
+      if (ready.length === 0) return;
+      const readyIds = new Set(ready.map((b) => b.id));
+      bombsRef.current = bombsRef.current.filter((b) => !readyIds.has(b.id));
+      setBombs((bs) => bs.filter((b) => !readyIds.has(b.id)));
+      ready.forEach((b) => detonate(b.x, b.y));
+    }, 100);
+    return () => clearInterval(t);
+  }, [bombs.length, detonate]);
+
+  // --- enemy AI: momentum patrol that hunts a quarter of the time ---
   useEffect(() => {
     if (status !== "playing") return;
     const t = setInterval(() => {
-      setEnemies((es) => {
-        return es.map((en) => {
+      // snapshot the world once per tick; the moves themselves are pure
+      const grid = gridRef.current;
+      const liveBombs = bombsRef.current;
+      const target = playerRef.current;
+      const isOpen = (x: number, y: number) =>
+        grid[y]?.[x] === "empty" && !liveBombs.some((b) => b.x === x && b.y === y);
+
+      setEnemies((es) =>
+        es.map((en) => {
           if (en.state !== "alive") return en; // dying enemies burn where they stand
-          const dirs = [
-            { dx: 1, dy: 0 },
-            { dx: -1, dy: 0 },
-            { dx: 0, dy: 1 },
-            { dx: 0, dy: -1 },
-            { dx: 0, dy: 0 },
-          ];
-          const shuffled = dirs.sort(() => Math.random() - 0.5);
-          for (const d of shuffled) {
-            const nx = en.x + d.dx;
-            const ny = en.y + d.dy;
-            if (gridRef.current[ny]?.[nx] !== "empty") continue;
-            if (bombsRef.current.some((b) => b.x === nx && b.y === ny)) continue;
-            return { ...en, x: nx, y: ny };
-          }
-          return en;
-        });
-      });
+          const step = chooseEnemyMove({
+            pos: { x: en.x, y: en.y },
+            facing: en.facing,
+            target,
+            isOpen,
+          });
+          if (!step) return en; // walled in
+          return { ...en, x: en.x + step.dx, y: en.y + step.dy, facing: step };
+        })
+      );
     }, ENEMY_MOVE_MS);
     return () => clearInterval(t);
   }, [status]);

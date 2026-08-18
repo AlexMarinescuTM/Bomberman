@@ -69,6 +69,6 @@ export function makeEnemies(grid: CellType[][]): Enemy[] {
   ];
   return spots.map((p, i) => {
     const safe = nearestEmptyCell(grid, p);
-    return { ...safe, id: i, state: "alive" as const, dyingSince: null };
+    return { ...safe, id: i, state: "alive" as const, dyingSince: null, facing: null };
   });
 }

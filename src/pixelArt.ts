@@ -72,6 +72,55 @@ export const PLAYER_COLORS: Record<string, string> = {
   B: "#7fd4ff",
 };
 
+/** Breathing in: head sits a pixel higher and the torso stretches to match. */
+const PLAYER_INHALE = [
+  ".....KKKKKK.....",
+  "....KhhhhhhK....",
+  "...KhwwwwwwhK...",
+  "...KwKwwwwKwK...",
+  "...KwwwwwwwwK...",
+  "...KhwwwwwwhK...",
+  "....KKKKKKKK....",
+  "...KbbbBBbbbK...",
+  "..KbbbBBBBbbbK..",
+  "..KbbBBBBBBbbK..",
+  "..KbbBBBBBBbbK..",
+  "..KbbbBBBBbbbK..",
+  "...KbbbbbbbbK...",
+  "...KbbbbbbbbK...",
+  "....KK....KK....",
+  "................",
+] as const;
+
+/** Blink: the pupils widen into closed lids. */
+const PLAYER_BLINK = [
+  "................",
+  ".....KKKKKK.....",
+  "....KhhhhhhK....",
+  "...KhwwwwwwhK...",
+  "...KwKKwwKKwK...",
+  "...KwwwwwwwwK...",
+  "...KhwwwwwwhK...",
+  "....KKKKKKKK....",
+  "...KbbbBBbbbK...",
+  "..KbbbBBBBbbbK..",
+  "..KbbBBBBBBbbK..",
+  "..KbbbBBBBbbbK..",
+  "...KbbbbbbbbK...",
+  "...KbbbbbbbbK...",
+  "....KK....KK....",
+  "................",
+] as const;
+
+/** Idle loop: settle, breathe in, settle, blink. */
+export const PLAYER_IDLE_FRAMES = [
+  PLAYER_SPRITE,
+  PLAYER_INHALE,
+  PLAYER_SPRITE,
+  PLAYER_BLINK,
+] as const;
+export const PLAYER_IDLE_MS = 1000;
+
 export const ENEMY_SPRITE = [
   "................",
   "................",
@@ -90,6 +139,55 @@ export const ENEMY_SPRITE = [
   "....KK....KK....",
   "................",
 ] as const;
+
+/** Squash: the blob settles, flattening and bulging out at the waist. */
+const ENEMY_SQUASH = [
+  "................",
+  "................",
+  "................",
+  "......KKKK......",
+  "....KKrrrrKK....",
+  "...KrrrrrrrrK...",
+  "..KrKwwrrwwKrK..",
+  "..KrKwKrrKwKrK..",
+  "..KrrrrrrrrrrK..",
+  ".KrrdddddddrrrK.",
+  ".KrrrrrrrrrrrrK.",
+  ".KRrrrrrrrrrrRK.",
+  "..KrrrrrrrrrrK..",
+  "...KrrrrrrrrK...",
+  "....KK....KK....",
+  "................",
+] as const;
+
+/** Stretch: it bounces up, drawing in at the sides. */
+const ENEMY_STRETCH = [
+  "................",
+  "......KKKK......",
+  "....KKrrrrKK....",
+  "...KrrrrrrrrK...",
+  "..KrrrrrrrrrrK..",
+  "..KrKwwrrwwKrK..",
+  "..KrKwKrrKwKrK..",
+  "..KrrrrrrrrrrK..",
+  "...KrdddddrrK...",
+  "...KrrrrrrrrK...",
+  "...KRrrrrrrRK...",
+  "...KrrrrrrrrK...",
+  "...KrrrrrrrrK...",
+  "....KrrrrrrK....",
+  "....KK....KK....",
+  "................",
+] as const;
+
+/** Idle loop: rest, squash, rest, stretch -- a slow blobby bounce. */
+export const ENEMY_IDLE_FRAMES = [
+  ENEMY_SPRITE,
+  ENEMY_SQUASH,
+  ENEMY_SPRITE,
+  ENEMY_STRETCH,
+] as const;
+export const ENEMY_IDLE_MS = 640;
 
 export const ENEMY_COLORS: Record<string, string> = {
   K: PAL.ink,

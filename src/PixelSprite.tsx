@@ -5,6 +5,58 @@ import React from "react";
 // Rows are strings of palette keys; "." (or any key absent from the palette) is
 // transparent. Horizontally adjacent same-colour pixels are merged into a single
 // rect, so a 16x16 sprite costs a handful of nodes rather than 256.
+/**
+ * Plays a looping frame animation, sprite-sheet style: the frames sit side by
+ * side in a strip and the strip is stepped one frame-width at a time behind a
+ * fixed-size window. That runs entirely on the compositor -- no per-frame React
+ * state, so an idling character costs no re-renders.
+ *
+ * Pair with the `px-sprite-strip` keyframe (translateX 0 -> -100%); because the
+ * offset is a percentage of the strip's own width, `steps(n)` lands exactly on
+ * each frame boundary whatever the frame count.
+ */
+export function AnimatedPixelSprite({
+  frames,
+  palette,
+  size,
+  durationMs,
+  paused = false,
+  style,
+}: {
+  frames: readonly (readonly string[])[];
+  palette: Record<string, string>;
+  size: number;
+  durationMs: number;
+  paused?: boolean;
+  style?: React.CSSProperties;
+}) {
+  if (paused || frames.length <= 1) {
+    return <PixelSprite rows={frames[0]} palette={palette} size={size} style={style} />;
+  }
+  return (
+    <div style={{ width: size, height: size, overflow: "hidden", ...style }}>
+      <div
+        style={{
+          display: "flex",
+          width: size * frames.length,
+          height: size,
+          animation: `px-sprite-strip ${durationMs}ms steps(${frames.length}) infinite`,
+        }}
+      >
+        {frames.map((rows, i) => (
+          <PixelSprite
+            key={i}
+            rows={rows}
+            palette={palette}
+            size={size}
+            style={{ flexShrink: 0 }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PixelSprite({
   rows,
   palette,

@@ -17,6 +17,8 @@ import {
   BOMB_COLORS,
   BOMB_SPRITE,
   ENEMY_COLORS,
+  ENEMY_IDLE_FRAMES,
+  ENEMY_IDLE_MS,
   ENEMY_SPRITE,
   HEART_COLORS,
   HEART_COLORS_DIM,
@@ -26,12 +28,13 @@ import {
   PICKUP_SPRITE,
   PIXEL_FONT,
   PLAYER_COLORS,
-  PLAYER_SPRITE,
+  PLAYER_IDLE_FRAMES,
+  PLAYER_IDLE_MS,
   brickTileStyle,
   floorTileStyle,
   wallTileStyle,
 } from "./pixelArt";
-import { PixelSprite } from "./PixelSprite";
+import { AnimatedPixelSprite, PixelSprite } from "./PixelSprite";
 
 // Entities are drawn at 2x the 16px sprite grid so every pixel lands on a whole
 // screen pixel; the 4px margin centres that 32px sprite inside a 40px tile.
@@ -351,7 +354,13 @@ export default function Bomberman() {
                       : undefined,
                   }}
                 >
-                  <PixelSprite rows={ENEMY_SPRITE} palette={ENEMY_COLORS} size={SPRITE_PX} />
+                  <AnimatedPixelSprite
+                    frames={ENEMY_IDLE_FRAMES}
+                    palette={ENEMY_COLORS}
+                    size={SPRITE_PX}
+                    durationMs={ENEMY_IDLE_MS}
+                    paused={burning}
+                  />
                 </div>
                 {burning && <EmberPlume left={e.x * CELL} top={e.y * CELL} />}
               </React.Fragment>
@@ -376,7 +385,13 @@ export default function Bomberman() {
               : undefined,
           }}
         >
-          <PixelSprite rows={PLAYER_SPRITE} palette={PLAYER_COLORS} size={SPRITE_PX} />
+          <AnimatedPixelSprite
+            frames={PLAYER_IDLE_FRAMES}
+            palette={PLAYER_COLORS}
+            size={SPRITE_PX}
+            durationMs={PLAYER_IDLE_MS}
+            paused={playerDeath !== null}
+          />
         </div>
         {playerDeath?.cause === "burn" && (
           <EmberPlume left={player.x * CELL} top={player.y * CELL} />
@@ -600,6 +615,13 @@ export default function Bomberman() {
         @keyframes crate-splinter {
           0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scaleX(1); }
           100% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scaleX(0.18); }
+        }
+
+        /* Sprite-sheet stepping: the strip is frames*size wide, so -100% of its
+           own width divided into steps(frames) lands exactly one frame per step. */
+        @keyframes px-sprite-strip {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-100%); }
         }
 
         @keyframes px-toast {

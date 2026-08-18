@@ -31,6 +31,8 @@ export type Enemy = {
   id: number;
   state: EnemyState;
   dyingSince: number | null;
+  /** last direction travelled, so the AI can keep its momentum */
+  facing: { dx: number; dy: number } | null;
 };
 export type Pickup = { x: number; y: number; id: number };
 
