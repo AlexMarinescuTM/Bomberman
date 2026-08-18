@@ -7,16 +7,36 @@ export const EXPLOSION_MS = 500;
 export const ENEMY_MOVE_MS = 500;
 export const PLAYER_MOVE_MS = 120;
 export const BLAST_RANGE = 2;
-export const STARTING_MAX_BOMBS = 3;
+/** Hard cap on bombs the player can carry -- fixed for the whole run, never raised by pickups. */
+export const MAX_BOMBS = 3;
 export const BOMB_PICKUP_CHANCE = 1 / 3;
+/** How long a death animation plays before the player respawns / an enemy vanishes. */
+export const DEATH_ANIM_MS = 2000;
+/** How long the player must be truly stuck (no bombs, none ticking, nothing to collect) before a free bomb is granted. */
+export const SOFTLOCK_RESCUE_MS = 3000;
+/** How long the "here's a free bomb" toast stays up. */
+export const RESCUE_NOTICE_MS = 3000;
+export const PLAYER_SPAWN: Pos = { x: 1, y: 1 };
 
 export type CellType = "empty" | "wall" | "brick";
 export type Pos = { x: number; y: number };
 export type Bomb = { x: number; y: number; id: number; placedAt: number };
 export type ExplosionCell = { x: number; y: number; delay: number; wasBrick: boolean };
 export type Explosion = { cells: ExplosionCell[]; id: number };
-export type Enemy = { x: number; y: number; id: number; alive: boolean };
+/** "dying" enemies are mid-incineration: still drawn, but harmless and frozen. */
+export type EnemyState = "alive" | "dying" | "dead";
+export type Enemy = {
+  x: number;
+  y: number;
+  id: number;
+  state: EnemyState;
+  dyingSince: number | null;
+};
 export type Pickup = { x: number; y: number; id: number };
+
+/** "burn" = caught in a blast (incineration), "hit" = caught by an enemy. */
+export type DeathCause = "burn" | "hit";
+export type PlayerDeath = { cause: DeathCause; startedAt: number } | null;
 export type Particle = {
   id: number;
   x: number; // pixel origin

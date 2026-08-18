@@ -1,7 +1,144 @@
 import React from "react";
-import { CELL, COLS, ENEMY_MOVE_MS, PLAYER_MOVE_MS, ROWS } from "./bomberman.types";
+import "@fontsource/press-start-2p";
+import {
+  CELL,
+  COLS,
+  DEATH_ANIM_MS,
+  ENEMY_MOVE_MS,
+  MAX_BOMBS,
+  PLAYER_MOVE_MS,
+  ROWS,
+} from "./bomberman.types";
 import type { ExplosionCell } from "./bomberman.types";
 import { useBombermanGame } from "./useBombermanGame";
+import { CRATE_BREAK_MS, crateShards } from "./crateBreaks";
+import type { CrateBreak } from "./crateBreaks";
+import {
+  BOMB_COLORS,
+  BOMB_SPRITE,
+  ENEMY_COLORS,
+  ENEMY_SPRITE,
+  HEART_COLORS,
+  HEART_COLORS_DIM,
+  HEART_SPRITE,
+  PAL,
+  PICKUP_COLORS,
+  PICKUP_SPRITE,
+  PIXEL_FONT,
+  PLAYER_COLORS,
+  PLAYER_SPRITE,
+  brickTileStyle,
+  floorTileStyle,
+  wallTileStyle,
+} from "./pixelArt";
+import { PixelSprite } from "./PixelSprite";
+
+// Entities are drawn at 2x the 16px sprite grid so every pixel lands on a whole
+// screen pixel; the 4px margin centres that 32px sprite inside a 40px tile.
+const SPRITE_PX = 32;
+const SPRITE_INSET = (CELL - SPRITE_PX) / 2;
+
+// Hard-banded fireball -- concentric rings with no soft falloff anywhere.
+const BLAST_FILL = `radial-gradient(circle, ${PAL.fire0} 0 20%, ${PAL.fire1} 20% 42%, ${PAL.fire2} 42% 64%, ${PAL.fire3} 64% 84%, transparent 84%)`;
+
+function panelStyle(): React.CSSProperties {
+  return {
+    background: PAL.panel,
+    boxShadow: [
+      `inset 0 0 0 1px ${PAL.ink}`,
+      `inset 3px 3px 0 ${PAL.panelHi}`,
+      `inset -3px -3px 0 ${PAL.panelLo}`,
+    ].join(", "),
+  };
+}
+
+// Chunky embers that lick upward off whatever is being incinerated. Fixed
+// offsets and staggered delays keep it deterministic and cheap; the loop is
+// short enough to repeat a few times across the death animation.
+const EMBERS = [
+  { x: 7, y: 24, size: 6, color: PAL.fire1, delay: 0 },
+  { x: 17, y: 28, size: 5, color: PAL.fire2, delay: 170 },
+  { x: 25, y: 22, size: 6, color: PAL.fire1, delay: 330 },
+  { x: 12, y: 20, size: 4, color: PAL.fire0, delay: 500 },
+  { x: 21, y: 30, size: 5, color: PAL.fire3, delay: 250 },
+  { x: 29, y: 27, size: 4, color: PAL.fire2, delay: 620 },
+];
+
+// A crate coming apart: four quadrant shards, each flying off along the path
+// its variant dictates. Same bevelled brick colours as the intact tile so the
+// pieces read as bits of the crate rather than generic debris.
+function CrateShards({ cb }: { cb: CrateBreak }) {
+  const half = CELL / 2;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: cb.x * CELL,
+        top: cb.y * CELL,
+        width: CELL,
+        height: CELL,
+        pointerEvents: "none",
+        zIndex: 3,
+      }}
+    >
+      {crateShards(cb.variant).map((s, i) => (
+        <div
+          key={i}
+          style={
+            {
+              position: "absolute",
+              left: s.qx * half,
+              top: s.qy * half,
+              width: half,
+              height: half,
+              background: PAL.brickMid,
+              boxShadow: [
+                `inset 0 0 0 1px ${PAL.brickInk}`,
+                `inset 2px 2px 0 ${PAL.brickHi}`,
+                `inset -2px -2px 0 ${PAL.brickLo}`,
+              ].join(", "),
+              animation: `crate-${cb.variant} ${CRATE_BREAK_MS}ms steps(6) ${cb.delay}ms forwards`,
+              "--sx": `${s.sx}px`,
+              "--sy": `${s.sy}px`,
+              "--sr": `${s.sr}deg`,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmberPlume({ left, top }: { left: number; top: number }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width: CELL,
+        height: CELL,
+        pointerEvents: "none",
+        zIndex: 7,
+      }}
+    >
+      {EMBERS.map((e, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: e.x,
+            top: e.y,
+            width: e.size,
+            height: e.size,
+            background: e.color,
+            animation: `px-ember 760ms steps(4) ${e.delay}ms infinite`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
 export default function Bomberman() {
   const {
@@ -9,14 +146,17 @@ export default function Bomberman() {
     player,
     enemies,
     bombs,
-    maxBombs,
     bombsAvailable,
     pickups,
+    crateBreaks,
+    rescueNotice,
     explosions,
     particles,
     lives,
     status,
     flash,
+    playerDeath,
+    respawnKey,
     restart,
   } = useBombermanGame();
 
@@ -31,70 +171,90 @@ export default function Bomberman() {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 14,
-        padding: 20,
-        background: "radial-gradient(circle at 50% 0%, #1c1f2b 0%, #0b0d14 70%)",
-        borderRadius: 16,
-        fontFamily: "'Courier New', monospace",
-        color: "#e9e4d8",
+        gap: 16,
+        padding: 24,
+        background: PAL.void,
+        fontFamily: PIXEL_FONT,
+        color: PAL.ui,
         width: "fit-content",
-        boxShadow: "0 0 0 1px #2a2f42, 0 20px 60px rgba(0,0,0,0.5)",
+        imageRendering: "pixelated",
+        boxShadow: `0 0 0 4px ${PAL.panelHi}, 0 0 0 8px ${PAL.ink}`,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-        <h1
-          style={{
-            fontSize: 22,
-            letterSpacing: 3,
-            margin: 0,
-            color: "#f2b632",
-            textShadow: "0 0 12px rgba(242,182,50,0.5)",
-          }}
-        >
-          ⬛ BOMBER GRID
-        </h1>
-        <div style={{ display: "flex", gap: 6 }}>
+      {/* ---- title ---- */}
+      <h1
+        style={{
+          fontSize: 16,
+          lineHeight: 1.4,
+          letterSpacing: 2,
+          margin: 0,
+          color: PAL.gold,
+          textShadow: `3px 3px 0 ${PAL.ink}`,
+        }}
+      >
+        BOMBER GRID
+      </h1>
+
+      {/* ---- HUD ---- */}
+      <div
+        style={{
+          ...panelStyle(),
+          display: "flex",
+          alignItems: "center",
+          gap: 18,
+          padding: "10px 14px",
+          width: COLS * CELL - 8,
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           {Array.from({ length: 3 }).map((_, i) => (
-            <span key={i} style={{ fontSize: 18, opacity: i < lives ? 1 : 0.2 }}>
-              ❤️
-            </span>
+            <PixelSprite
+              key={i}
+              rows={HEART_SPRITE}
+              palette={i < lives ? HEART_COLORS : HEART_COLORS_DIM}
+              size={16}
+            />
           ))}
         </div>
-        <div style={{ fontSize: 13, opacity: 0.7 }}>
-          Enemies left: {enemies.filter((e) => e.alive).length}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 8 }}>
+          <PixelSprite rows={BOMB_SPRITE} palette={BOMB_COLORS} size={18} />
+          <span style={{ color: bombsAvailable === 0 ? PAL.red : PAL.ui }}>
+            {bombsAvailable}/{MAX_BOMBS}
+          </span>
         </div>
-        <div style={{ fontSize: 13, opacity: 0.7 }}>
-          Bombs: {bombsAvailable}/{maxBombs}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 8, marginLeft: "auto" }}>
+          <PixelSprite rows={ENEMY_SPRITE} palette={ENEMY_COLORS} size={18} />
+          <span>{enemies.filter((e) => e.state === "alive").length}</span>
         </div>
       </div>
 
+      {/* ---- board ---- */}
       <div
         style={{
           position: "relative",
           width: COLS * CELL,
           height: ROWS * CELL,
-          background:
-            "linear-gradient(145deg, rgba(255,255,255,0.035), transparent 18%), radial-gradient(circle at 50% 20%, #1c2030 0%, #0d1018 72%)",
-          border: "3px solid #2a2f42",
-          borderRadius: 10,
-          boxShadow: flash
-            ? "0 0 0 6px rgba(220,60,60,0.6) inset, 0 18px 40px rgba(0,0,0,0.55)"
-            : "inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -14px 28px rgba(0,0,0,0.32), 0 18px 40px rgba(0,0,0,0.45)",
-          transition: "box-shadow 0.15s",
+          background: PAL.floorB,
           overflow: "hidden",
-          transform: "perspective(900px) rotateX(2.5deg)",
-          transformOrigin: "50% 100%",
-
+          boxShadow: flash
+            ? `0 0 0 4px ${PAL.red}, 0 0 0 8px ${PAL.ink}`
+            : `0 0 0 4px ${PAL.panelHi}, 0 0 0 8px ${PAL.ink}`,
         }}
       >
-        {/* grid */}
+        {/* tiles */}
         {grid.map((row, y) =>
           row.map((cell, x) => {
             const key = `${x},${y}`;
             const blast = explodedMap.get(key);
-            let bg = "#181b26";
-            if (cell === "wall") bg = "#3a3f52";
-            else if (cell === "brick") bg = "#8a5a3b";
+            const tile =
+              cell === "wall"
+                ? wallTileStyle()
+                : cell === "brick"
+                  ? brickTileStyle()
+                  : floorTileStyle(x, y);
             return (
               <React.Fragment key={key}>
                 <div
@@ -104,62 +264,10 @@ export default function Bomberman() {
                     top: y * CELL,
                     width: CELL,
                     height: CELL,
-                    background: bg,
-                    border:
-                      cell === "wall"
-                        ? "1px solid #4a4f66"
-                        : cell === "brick"
-                          ? "1px solid #6b4128"
-                          : "1px solid #1a1d28",
                     boxSizing: "border-box",
-                    backgroundImage:
-                      cell === "brick"
-                        ? "linear-gradient(145deg, rgba(255,255,255,0.12), transparent 34%), repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 4px, transparent 4px 10px)"
-                        : cell === "wall"
-                          ? "linear-gradient(145deg, rgba(255,255,255,0.14), transparent 42%), linear-gradient(135deg, #4b5167, #292d3d)"
-                          : "linear-gradient(145deg, rgba(255,255,255,0.025), transparent 45%)",
-                    boxShadow:
-                      cell === "wall"
-                        ? "inset 0 1px 0 rgba(255,255,255,0.12), inset -3px -4px 0 rgba(0,0,0,0.22)"
-                        : cell === "brick"
-                          ? "inset 0 1px 0 rgba(255,232,190,0.16), inset -3px -4px 0 rgba(62,33,20,0.24)"
-                          : "inset 0 1px 0 rgba(255,255,255,0.03)",
+                    ...tile,
                   }}
-                >
-                  {cell !== "empty" && (
-                    <>
-                      <div
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: 0,
-                          width: "100%",
-                          height: 5,
-                          background:
-                            cell === "wall"
-                              ? "linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0))"
-                              : "linear-gradient(180deg, rgba(255,218,166,0.22), rgba(255,218,166,0))",
-                          pointerEvents: "none",
-                        }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          right: -1,
-                          top: 4,
-                          width: 4,
-                          height: "calc(100% - 4px)",
-                          background:
-                            cell === "wall"
-                              ? "linear-gradient(180deg, #232736, #151821)"
-                              : "linear-gradient(180deg, #5b341f, #392015)",
-                          boxShadow: "inset 1px 0 rgba(0,0,0,0.18)",
-                          pointerEvents: "none",
-                        }}
-                      />
-                    </>
-                  )}
-                </div>
+                />
                 {blast && (
                   <div
                     key={`${key}-${blast.delay}`}
@@ -173,49 +281,21 @@ export default function Bomberman() {
                         pointerEvents: "none",
                         zIndex: 4,
                         opacity: 0,
-                        animation: `bomberman-blast 380ms ease-out ${blast.delay}ms forwards`,
+                        background: BLAST_FILL,
+                        animation: `px-blast 400ms steps(4) ${blast.delay}ms forwards`,
                       } as React.CSSProperties
                     }
-                  >
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: "8%",
-                        borderRadius: "50%",
-                        background:
-                          "radial-gradient(circle, #ffffff 0%, #fff6d8 18%, #ffcf6b 42%, #ff8a3c 65%, rgba(255,90,30,0) 76%)",
-                        mixBlendMode: "screen",
-                        filter: "blur(0.4px)",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: "18%",
-                        border: "2px solid rgba(255,244,190,0.95)",
-                        borderRadius: "50%",
-                        boxShadow: "0 0 18px rgba(255,150,55,0.85), inset 0 0 14px rgba(255,208,100,0.75)",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        top: "50%",
-                        width: "135%",
-                        height: "35%",
-                        transform: "translate(-50%, -50%) rotate(-22deg)",
-                        borderRadius: "50%",
-                        background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,202,90,0.6), rgba(255,255,255,0))",
-                        filter: "blur(2px)",
-                      }}
-                    />
-                  </div>
+                  />
                 )}
               </React.Fragment>
             );
           })
         )}
+
+        {/* crates coming apart */}
+        {crateBreaks.map((cb) => (
+          <CrateShards key={cb.id} cb={cb} />
+        ))}
 
         {/* bombs */}
         {bombs.map((b) => (
@@ -223,19 +303,14 @@ export default function Bomberman() {
             key={b.id}
             style={{
               position: "absolute",
-              left: b.x * CELL + CELL * 0.18,
-              top: b.y * CELL + CELL * 0.18,
-              width: CELL * 0.64,
-              height: CELL * 0.64,
-              borderRadius: "50%",
-              background:
-                "radial-gradient(circle at 32% 24%, #a8a8a8 0%, #555 22%, #202020 58%, #070707 100%)",
-              boxShadow:
-                "inset -4px -6px 8px rgba(0,0,0,0.65), inset 3px 3px 5px rgba(255,255,255,0.22), 0 6px 10px rgba(0,0,0,0.45), 0 0 14px rgba(255,80,0,0.55)",
-              animation: "bomberman-pulse 0.5s infinite alternate",
-              transform: "translateZ(4px)",
+              left: b.x * CELL + SPRITE_INSET,
+              top: b.y * CELL + SPRITE_INSET,
+              zIndex: 2,
+              animation: "px-bomb 500ms steps(2) infinite alternate",
             }}
-          />
+          >
+            <PixelSprite rows={BOMB_SPRITE} palette={BOMB_COLORS} size={SPRITE_PX} />
+          </div>
         ))}
 
         {/* bomb pickups */}
@@ -244,127 +319,153 @@ export default function Bomberman() {
             key={pk.id}
             style={{
               position: "absolute",
-              left: pk.x * CELL + CELL * 0.2,
-              top: pk.y * CELL + CELL * 0.2,
-              width: CELL * 0.6,
-              height: CELL * 0.6,
-              borderRadius: "50%",
-              background:
-                "radial-gradient(circle at 32% 24%, #8a8a8a 0%, #4a4a4a 22%, #1c1c1c 58%, #070707 100%)",
-              boxShadow:
-                "inset -3px -4px 6px rgba(0,0,0,0.6), inset 2px 2px 4px rgba(255,255,255,0.2), 0 4px 8px rgba(0,0,0,0.4), 0 0 12px rgba(120,230,150,0.6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              animation: "bomberman-pulse 0.7s infinite alternate",
+              left: pk.x * CELL + SPRITE_INSET,
+              top: pk.y * CELL + SPRITE_INSET,
+              zIndex: 1,
+              animation: "px-bob 640ms steps(2) infinite alternate",
             }}
           >
-            <span
-              style={{
-                fontSize: CELL * 0.34,
-                fontWeight: "bold",
-                color: "#8effa5",
-                textShadow: "0 0 6px rgba(142,255,165,0.9)",
-              }}
-            >
-              +
-            </span>
+            <PixelSprite rows={PICKUP_SPRITE} palette={PICKUP_COLORS} size={SPRITE_PX} />
           </div>
         ))}
 
-        {/* enemies */}
+        {/* enemies -- "dying" ones stay on screen to burn away */}
         {enemies
-          .filter((e) => e.alive)
-          .map((e) => (
-            <div
-              key={e.id}
-              style={{
-                position: "absolute",
-                left: e.x * CELL + CELL * 0.12,
-                top: e.y * CELL + CELL * 0.12,
-                width: CELL * 0.76,
-                height: CELL * 0.76,
-                borderRadius: "30% 30% 50% 50%",
-                background:
-                  "radial-gradient(circle at 34% 24%, #ff9494 0%, #e14b4b 28%, #a11f1f 68%, #661515 100%)",
-                boxShadow:
-                  "inset -4px -5px 7px rgba(80,0,0,0.35), inset 3px 3px 5px rgba(255,255,255,0.16), 0 6px 8px rgba(0,0,0,0.38), 0 0 8px rgba(225,75,75,0.65)",
-                transition: `left ${ENEMY_MOVE_MS}ms linear, top ${ENEMY_MOVE_MS}ms linear`,
-                transform: "translateZ(3px)",
-              }}
-            />
-          ))}
+          .filter((e) => e.state !== "dead")
+          .map((e) => {
+            const burning = e.state === "dying";
+            return (
+              <React.Fragment key={e.id}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: e.x * CELL + SPRITE_INSET,
+                    top: e.y * CELL + SPRITE_INSET,
+                    zIndex: 3,
+                    transformOrigin: "50% 100%",
+                    transition: burning
+                      ? "none"
+                      : `left ${ENEMY_MOVE_MS}ms linear, top ${ENEMY_MOVE_MS}ms linear`,
+                    animation: burning
+                      ? `px-incinerate ${DEATH_ANIM_MS}ms steps(10) forwards`
+                      : undefined,
+                  }}
+                >
+                  <PixelSprite rows={ENEMY_SPRITE} palette={ENEMY_COLORS} size={SPRITE_PX} />
+                </div>
+                {burning && <EmberPlume left={e.x * CELL} top={e.y * CELL} />}
+              </React.Fragment>
+            );
+          })}
 
-        {/* player */}
+        {/* player -- respawnKey remounts the sprite so returning to spawn snaps
+            instead of sliding along the movement transition */}
+        <div
+          key={respawnKey}
+          style={{
+            position: "absolute",
+            left: player.x * CELL + SPRITE_INSET,
+            top: player.y * CELL + SPRITE_INSET,
+            zIndex: 5,
+            transformOrigin: "50% 100%",
+            transition: playerDeath
+              ? "none"
+              : `left ${PLAYER_MOVE_MS}ms linear, top ${PLAYER_MOVE_MS}ms linear`,
+            animation: playerDeath
+              ? `${playerDeath.cause === "burn" ? "px-incinerate" : "px-struck"} ${DEATH_ANIM_MS}ms steps(10) forwards`
+              : undefined,
+          }}
+        >
+          <PixelSprite rows={PLAYER_SPRITE} palette={PLAYER_COLORS} size={SPRITE_PX} />
+        </div>
+        {playerDeath?.cause === "burn" && (
+          <EmberPlume left={player.x * CELL} top={player.y * CELL} />
+        )}
+
+        {/* explosion debris -- square, unblurred, stepped */}
+        {particles.map((p) => {
+          const px = Math.max(3, Math.round(p.size / 2) * 2);
+          const color =
+            p.shape === "smoke"
+              ? PAL.smoke
+              : p.shape === "chunk"
+                ? PAL.brickMid
+                : p.color;
+          return (
+            <div
+              key={p.id}
+              style={
+                {
+                  position: "absolute",
+                  left: Math.round(p.x),
+                  top: Math.round(p.y),
+                  width: px,
+                  height: px,
+                  marginLeft: -px / 2,
+                  marginTop: -px / 2,
+                  background: color,
+                  pointerEvents: "none",
+                  zIndex: p.shape === "smoke" ? 3 : 6,
+                  animation: `${p.shape === "smoke" ? "px-smoke" : "px-shard"} ${p.duration}ms steps(5) ${p.delay}ms forwards`,
+                  "--tx": `${Math.round(p.tx)}px`,
+                  "--ty": `${Math.round(p.ty)}px`,
+                } as React.CSSProperties
+              }
+            />
+          );
+        })}
+
+        {/* soft-lock rescue toast */}
+        {rescueNotice !== null && (
+          <div
+            key={rescueNotice}
+            style={{
+              ...panelStyle(),
+              position: "absolute",
+              left: "50%",
+              top: 14,
+              transform: "translateX(-50%)",
+              padding: "10px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              zIndex: 9,
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+              animation: "px-toast 260ms steps(4) both",
+            }}
+          >
+            <PixelSprite rows={BOMB_SPRITE} palette={BOMB_COLORS} size={20} />
+            <div style={{ fontSize: 8, lineHeight: 1.8 }}>
+              <div style={{ color: PAL.gold }}>NO WAY OUT</div>
+              <div style={{ color: PAL.ui }}>+1 FREE BOMB</div>
+            </div>
+          </div>
+        )}
+
+        {/* CRT scanlines */}
         <div
           style={{
             position: "absolute",
-            left: player.x * CELL + CELL * 0.12,
-            top: player.y * CELL + CELL * 0.12,
-            width: CELL * 0.76,
-            height: CELL * 0.76,
-            borderRadius: "50% 50% 30% 30%",
-            background:
-              "radial-gradient(circle at 34% 22%, #d5f6ff 0%, #5fd0ff 24%, #2286c9 68%, #14507a 100%)",
-            boxShadow:
-              "inset -4px -6px 7px rgba(0,45,80,0.38), inset 3px 3px 5px rgba(255,255,255,0.24), 0 7px 9px rgba(0,0,0,0.36), 0 0 10px rgba(95,208,255,0.78)",
-            transition: `left ${PLAYER_MOVE_MS}ms linear, top ${PLAYER_MOVE_MS}ms linear`,
-            zIndex: 2,
-            transform: "translateZ(4px)",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 8,
+            background: `repeating-linear-gradient(0deg, rgba(0,0,0,0.20) 0 1px, transparent 1px 3px)`,
           }}
         />
-
-        {/* explosion particles */}
-        {particles.map((p) => (
-          <div
-            key={p.id}
-            style={
-              {
-                position: "absolute",
-                left: p.x,
-                top: p.y,
-                width: p.size,
-                height: p.size,
-                marginLeft: -p.size / 2,
-                marginTop: -p.size / 2,
-                borderRadius:
-                  p.shape === "chunk" ? 2 : p.shape === "spark" ? 2 : "50%",
-                background:
-                  p.shape === "smoke"
-                    ? `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.18), ${p.color} 45%, rgba(0,0,0,0.12) 100%)`
-                    : p.shape === "ember"
-                      ? `radial-gradient(circle, #fff7d6 0%, ${p.color} 45%, rgba(255,80,20,0) 100%)`
-                      : p.shape === "spark"
-                        ? `linear-gradient(90deg, rgba(255,255,255,0), ${p.color}, rgba(255,255,255,0))`
-                        : p.color,
-                boxShadow:
-                  p.shape === "chunk"
-                    ? "0 2px 3px rgba(0,0,0,0.5), inset 1px 1px rgba(255,255,255,0.14)"
-                    : p.shape === "smoke"
-                      ? "0 0 10px rgba(60,60,60,0.2)"
-                      : `0 0 ${p.size * 1.8}px ${p.color}`,
-                pointerEvents: "none",
-                zIndex: p.shape === "smoke" ? 3 : 6,
-                animation: `${p.shape === "chunk"
-                    ? "bomberman-chunk"
-                    : p.shape === "smoke"
-                      ? "bomberman-smoke"
-                      : p.shape === "spark"
-                        ? "bomberman-spark"
-                        : "bomberman-particle"
-                  } ${p.duration}ms ease-out ${p.delay}ms forwards`,
-                "--tx": `${p.tx}px`,
-                "--ty": `${p.ty}px`,
-                "--rot": `${p.rotation}deg`,
-              } as React.CSSProperties
-            }
-          />
-        ))}
       </div>
 
-      <div style={{ fontSize: 12, opacity: 0.65, textAlign: "center", lineHeight: 1.6 }}>
-        Move: Arrow keys / WASD &nbsp;•&nbsp; Bomb: Space<br />
-        Destroy brown bricks, avoid red enemies, clear the grid.
+      <div
+        style={{
+          fontSize: 8,
+          lineHeight: 2,
+          color: PAL.uiDim,
+          textAlign: "center",
+        }}
+      >
+        ARROWS / WASD - MOVE &nbsp;&nbsp; SPACE - BOMB
+        <br />
+        BLAST THE BRICKS &nbsp;&nbsp; CLEAR THE GRID
       </div>
 
       {status !== "playing" && (
@@ -372,114 +473,138 @@ export default function Bomberman() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(5,6,10,0.75)",
+            background: "rgba(10,10,18,0.86)",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 16,
+            gap: 22,
             zIndex: 10,
+            fontFamily: PIXEL_FONT,
           }}
         >
           <div
             style={{
-              fontSize: 32,
-              fontWeight: "bold",
-              color: status === "won" ? "#7ef2a1" : "#ff6b6b",
-              textShadow: "0 0 16px currentColor",
+              ...panelStyle(),
+              padding: "26px 34px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 22,
             }}
           >
-            {status === "won" ? "GRID CLEARED" : "GAME OVER"}
+            <div
+              style={{
+                fontSize: 20,
+                lineHeight: 1.5,
+                letterSpacing: 2,
+                color: status === "won" ? PAL.green : PAL.red,
+                textShadow: `3px 3px 0 ${PAL.ink}`,
+              }}
+            >
+              {status === "won" ? "GRID CLEARED" : "GAME OVER"}
+            </div>
+            <button
+              onClick={restart}
+              style={{
+                padding: "12px 20px",
+                fontSize: 10,
+                letterSpacing: 1,
+                background: PAL.gold,
+                color: PAL.ink,
+                border: "none",
+                borderRadius: 0,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: [
+                  `inset 0 0 0 1px ${PAL.ink}`,
+                  `inset 3px 3px 0 #ffe98a`,
+                  `inset -3px -3px 0 #b8860b`,
+                ].join(", "),
+              }}
+            >
+              PLAY AGAIN
+            </button>
           </div>
-          <button
-            onClick={restart}
-            style={{
-              padding: "10px 24px",
-              fontSize: 14,
-              letterSpacing: 1,
-              background: "#f2b632",
-              color: "#12141c",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              fontWeight: "bold",
-            }}
-          >
-            PLAY AGAIN
-          </button>
         </div>
       )}
 
       <style>{`
-        @keyframes bomberman-pulse {
-          from { transform: scale(1); }
-          to { transform: scale(1.15); }
+        @keyframes px-bomb {
+          from { transform: translateY(0); }
+          to   { transform: translateY(-2px); }
         }
-        @keyframes bomberman-particle {
-          0% {
-            transform: translate(0, 0) scale(1);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(var(--tx), var(--ty)) scale(0.15);
-            opacity: 0;
-          }
+        @keyframes px-bob {
+          from { transform: translateY(0); }
+          to   { transform: translateY(-3px); }
         }
-        @keyframes bomberman-spark {
-          0% {
-            transform: translate(0, 0) rotate(var(--rot)) scaleX(0.7);
-            opacity: 1;
-          }
-          18% {
-            transform: translate(calc(var(--tx) * 0.28), calc(var(--ty) * 0.28)) rotate(var(--rot)) scaleX(1.3);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scaleX(0.1);
-            opacity: 0;
-          }
+        @keyframes px-blast {
+          0%   { opacity: 1; transform: scale(0.35); }
+          60%  { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(1.2); }
         }
-        @keyframes bomberman-smoke {
-          0% {
-            transform: translate(0, 0) scale(0.55);
-            opacity: 0;
-          }
-          15% {
-            opacity: 0.5;
-          }
-          100% {
-            transform: translate(var(--tx), var(--ty)) scale(1.5);
-            opacity: 0;
-          }
+        @keyframes px-shard {
+          0%   { opacity: 1; transform: translate(0, 0); }
+          100% { opacity: 0; transform: translate(var(--tx), var(--ty)); }
         }
-        @keyframes bomberman-chunk {
-          0% {
-            transform: translate(0, 0) rotate(0deg) scale(1);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scale(0.4);
-            opacity: 0;
-          }
+        @keyframes px-smoke {
+          0%   { opacity: 0.75; transform: translate(0, 0); }
+          100% { opacity: 0; transform: translate(var(--tx), var(--ty)); }
         }
-        @keyframes bomberman-blast {
-          0% {
-            opacity: 0;
-            transform: scale(0.2);
-          }
-          25% {
-            opacity: 1;
-            transform: scale(1.1);
-          }
-          60% {
-            opacity: 0.85;
-            transform: scale(1);
-          }
-          100% {
-            opacity: 0;
-            transform: scale(1.35);
-          }
+
+        /* Death: burned alive. Flash white, scorch through orange to charcoal,
+           then collapse into the floor. */
+        @keyframes px-incinerate {
+          0%   { filter: none; opacity: 1; transform: scaleY(1); }
+          15%  { filter: brightness(6) saturate(0); opacity: 1; transform: scaleY(1.05); }
+          35%  { filter: sepia(1) saturate(9) hue-rotate(-20deg) brightness(1.7); transform: scaleY(1); }
+          60%  { filter: sepia(1) saturate(9) hue-rotate(-35deg) brightness(1.25); transform: scaleY(0.82); }
+          85%  { filter: sepia(1) saturate(6) hue-rotate(-45deg) brightness(0.7); opacity: 0.8; transform: scaleY(0.45); }
+          100% { filter: brightness(0.25) saturate(0); opacity: 0; transform: scaleY(0.1); }
+        }
+        /* Death: caught by an enemy. Hit-flash a few times, topple over, fade. */
+        @keyframes px-struck {
+          0%   { filter: none; opacity: 1; transform: rotate(0deg); }
+          10%  { filter: brightness(6) saturate(0); }
+          20%  { filter: none; }
+          30%  { filter: brightness(6) saturate(0); }
+          40%  { filter: none; transform: rotate(-12deg); }
+          50%  { filter: brightness(6) saturate(0); }
+          65%  { filter: grayscale(0.6) brightness(0.9); transform: rotate(-45deg); }
+          100% { filter: grayscale(1) brightness(0.4); opacity: 0; transform: rotate(-90deg) translateY(6px); }
+        }
+        @keyframes px-ember {
+          0%   { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(-20px); }
+        }
+
+        /* --- crate destruction, one keyframe per variant --- */
+        /* blown apart: pieces fly out diagonally, spinning */
+        @keyframes crate-shatter {
+          0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+          100% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scale(0.3); }
+        }
+        /* collapses: sags, then drops into a flattened heap */
+        @keyframes crate-crumble {
+          0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scaleY(1); }
+          45%  { opacity: 1; transform: translate(calc(var(--sx) * 0.35), calc(var(--sy) * 0.45)) rotate(calc(var(--sr) * 0.4)) scaleY(0.72); }
+          100% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scaleY(0.12); }
+        }
+        /* pops: bright flare, swells, then launches upward */
+        @keyframes crate-burst {
+          0%   { opacity: 1; filter: brightness(2.6); transform: translate(0, 0) scale(1); }
+          25%  { opacity: 1; filter: brightness(1.5); transform: translate(calc(var(--sx) * 0.4), calc(var(--sy) * 0.35)) scale(1.18); }
+          100% { opacity: 0; filter: brightness(1);   transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scale(0.28); }
+        }
+        /* splits: squashes into thin slats that shoot sideways */
+        @keyframes crate-splinter {
+          0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scaleX(1); }
+          100% { opacity: 0; transform: translate(var(--sx), var(--sy)) rotate(var(--sr)) scaleX(0.18); }
+        }
+
+        @keyframes px-toast {
+          0%   { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+          100% { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>
