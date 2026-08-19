@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  BLAST_RANGE,
   BOMB_FUSE_MS,
   CELL,
   DEATH_ANIM_MS,
@@ -33,7 +32,16 @@ import {
 } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
 import { chooseEnemyMove } from "./enemyAI";
-import { RIPPLE_STEP, clearCrates, computeBlast } from "./blast";
+import { clearCrates, computeBlast } from "./blast";
+import { isCaught, tweenPos } from "./collision";
+import {
+  POWERUP_MS,
+  applyPowerUp,
+  blastShapeFor,
+  hasPowerUp,
+  rollEnemyDrop,
+} from "./powerUps";
+import type { ActivePowerUp, PowerUpDrop } from "./powerUps";
 
 export function useBombermanGame() {
   const initialGridRef = useRef<CellType[][] | null>(null);
@@ -50,6 +58,10 @@ export function useBombermanGame() {
   const [bombsAvailable, setBombsAvailable] = useState(MAX_BOMBS);
   const [pickups, setPickups] = useState<Pickup[]>([]);
   const [crateBreaks, setCrateBreaks] = useState<CrateBreak[]>([]);
+  const [powerUpDrops, setPowerUpDrops] = useState<PowerUpDrop[]>([]);
+  const [activePowerUps, setActivePowerUps] = useState<ActivePowerUp[]>([]);
+  // ticks only while something is counting down, so the header can show seconds
+  const [now, setNow] = useState(() => Date.now());
   // set when the soft-lock rescue fires, so the UI can show a brief toast
   const [rescueNotice, setRescueNotice] = useState<number | null>(null);
   const [explosions, setExplosions] = useState<Explosion[]>([]);
@@ -80,6 +92,15 @@ export function useBombermanGame() {
   livesRef.current = lives;
   const playerDeathRef = useRef(playerDeath);
   playerDeathRef.current = playerDeath;
+  const enemiesRef = useRef(enemies);
+  enemiesRef.current = enemies;
+  const activePowerUpsRef = useRef(activePowerUps);
+  activePowerUpsRef.current = activePowerUps;
+  const powerUpDropsRef = useRef(powerUpDrops);
+  powerUpDropsRef.current = powerUpDrops;
+  // where the player is sliding from, and when that slide started
+  const playerFromRef = useRef<Pos>(PLAYER_SPAWN);
+  const playerMovedAtRef = useRef(0);
 
   // --- movement: held direction keys drive a fixed-tick walk, same cadence style as
   // enemies, but the first step of a press fires immediately (no tick to wait out) so
@@ -91,13 +112,16 @@ export function useBombermanGame() {
   const stepPlayer = useCallback((dir: { dx: number; dy: number }) => {
     if (statusRef.current !== "playing") return;
     if (playerDeathRef.current) return; // frozen while the death animation plays
-    setPlayer((p) => {
-      const nx = p.x + dir.dx;
-      const ny = p.y + dir.dy;
-      const cell = gridRef.current[ny]?.[nx];
-      if (cell === "empty") return { x: nx, y: ny };
-      return p;
-    });
+    const p = playerRef.current;
+    const nx = p.x + dir.dx;
+    const ny = p.y + dir.dy;
+    if (gridRef.current[ny]?.[nx] !== "empty") return;
+    // record the slide (and keep the ref current) so contact tests can work out
+    // where the player actually is mid-glide
+    playerFromRef.current = { x: p.x, y: p.y };
+    playerMovedAtRef.current = Date.now();
+    playerRef.current = { x: nx, y: ny };
+    setPlayer({ x: nx, y: ny });
   }, []);
 
   const stopRepeat = useCallback(() => {
@@ -191,6 +215,7 @@ export function useBombermanGame() {
   const hitPlayer = useCallback((cause: DeathCause) => {
     if (statusRef.current !== "playing") return;
     if (playerDeathRef.current) return; // already dying; ignore further hits
+    if (hasPowerUp(activePowerUpsRef.current, "invincible")) return; // shrugged off
     const death = { cause, startedAt: Date.now() };
     playerDeathRef.current = death; // set synchronously so same-tick hits bail out
     setPlayerDeath(death);
@@ -201,8 +226,16 @@ export function useBombermanGame() {
 
   const detonate = useCallback((bx: number, by: number) => {
     // Footprint first, as a pure computation off the live grid -- see blast.ts
-    // for why this must not happen inside a state updater.
-    const { cells, destroyed } = computeBlast(gridRef.current, bx, by);
+    // for why this must not happen inside a state updater. The pierce power-up
+    // widens the blast and lets each arm break a second crate.
+    const shape = blastShapeFor(hasPowerUp(activePowerUpsRef.current, "pierce"));
+    const { cells, destroyed } = computeBlast(
+      gridRef.current,
+      bx,
+      by,
+      shape.range,
+      shape.crates
+    );
 
     if (destroyed.length > 0) {
       // Keep the ref in step synchronously so a second bomb detonating in this
@@ -214,10 +247,12 @@ export function useBombermanGame() {
 
     idCounter.current += 1;
     const expId = idCounter.current;
+    // clear once the furthest arm has finished igniting, whatever the blast size
+    const lastIgnition = cells.reduce((max, c) => Math.max(max, c.delay), 0);
     setExplosions((ex) => [...ex, { cells, id: expId }]);
     setTimeout(() => {
       setExplosions((ex) => ex.filter((e) => e.id !== expId));
-    }, EXPLOSION_MS + BLAST_RANGE * RIPPLE_STEP);
+    }, EXPLOSION_MS + lastIgnition);
 
     // richer explosion particles: layered fire, smoke, embers, sparks and debris.
     const fireColors = ["#fff8dc", "#ffe08a", "#ffb347", "#ff7a3c", "#ff4d2e"];
@@ -373,6 +408,15 @@ export function useBombermanGame() {
       }, breakLifetime + 80);
     }
 
+    // power-up drops caught in the fire are lost, same as bomb pickups
+    const survivingDrops = powerUpDropsRef.current.filter(
+      (d) => !cells.some((c) => c.x === d.x && c.y === d.y)
+    );
+    if (survivingDrops.length !== powerUpDropsRef.current.length) {
+      powerUpDropsRef.current = survivingDrops;
+      setPowerUpDrops(survivingDrops);
+    }
+
     // check player hit -- caught in a blast means incineration
     const p = playerRef.current;
     if (!playerDeathRef.current && cells.some((c) => c.x === p.x && c.y === p.y)) {
@@ -438,6 +482,7 @@ export function useBombermanGame() {
     if (status !== "playing") return;
     const t = setInterval(() => {
       // snapshot the world once per tick; the moves themselves are pure
+      const steppedAt = Date.now();
       const grid = gridRef.current;
       const liveBombs = bombsRef.current;
       const target = playerRef.current;
@@ -454,22 +499,54 @@ export function useBombermanGame() {
             isOpen,
           });
           if (!step) return en; // walled in
-          return { ...en, x: en.x + step.dx, y: en.y + step.dy, facing: step };
+          return {
+            ...en,
+            x: en.x + step.dx,
+            y: en.y + step.dy,
+            facing: step,
+            fromX: en.x,
+            fromY: en.y,
+            movedAt: steppedAt,
+          };
         })
       );
     }, ENEMY_MOVE_MS);
     return () => clearInterval(t);
   }, [status]);
 
-  // --- collision check: enemy touches player ---
+  // --- contact check: enemy catches player ---
+  // Polled rather than run off state changes, because both parties glide between
+  // tiles: contact happens partway through a slide, not at the instant the
+  // logical tile changes. See collision.ts.
   useEffect(() => {
     if (status !== "playing") return;
-    if (playerDeath) return; // already dying, and a corpse can't be caught again
-    const touched = enemies.some(
-      (en) => en.state === "alive" && en.x === player.x && en.y === player.y
-    );
-    if (touched) hitPlayer("hit");
-  }, [enemies, player, status, hitPlayer, playerDeath]);
+    const t = setInterval(() => {
+      if (playerDeathRef.current) return;
+      const stamp = Date.now();
+      const here = tweenPos(
+        playerFromRef.current,
+        playerRef.current,
+        playerMovedAtRef.current,
+        PLAYER_MOVE_MS,
+        stamp
+      );
+      for (const en of enemiesRef.current) {
+        if (en.state !== "alive") continue;
+        const there = tweenPos(
+          { x: en.fromX, y: en.fromY },
+          { x: en.x, y: en.y },
+          en.movedAt,
+          ENEMY_MOVE_MS,
+          stamp
+        );
+        if (isCaught(here, there)) {
+          hitPlayer("hit");
+          break;
+        }
+      }
+    }, 40);
+    return () => clearInterval(t);
+  }, [status, hitPlayer]);
 
   // --- collision check: player picks up a bomb pickup ---
   useEffect(() => {
@@ -480,6 +557,34 @@ export function useBombermanGame() {
     setBombsAvailable((n) => Math.min(n + 1, MAX_BOMBS));
     setPickups((ps) => ps.filter((pk) => pk.id !== hit.id));
   }, [player, pickups, status]);
+
+  // --- collision check: player walks over a power-up drop ---
+  useEffect(() => {
+    if (status !== "playing") return;
+    const hit = powerUpDrops.find((d) => d.x === player.x && d.y === player.y);
+    if (!hit) return;
+    setActivePowerUps((active) => applyPowerUp(active, hit.kind, Date.now()));
+    setPowerUpDrops((ds) => ds.filter((d) => d.id !== hit.id));
+  }, [player, powerUpDrops, status]);
+
+  // --- power-up clock: counts the header down and retires anything expired ---
+  const hasTimers = powerUpDrops.length > 0 || activePowerUps.length > 0;
+  useEffect(() => {
+    if (!hasTimers) return;
+    const t = setInterval(() => {
+      const stamp = Date.now();
+      setNow(stamp);
+      setPowerUpDrops((ds) => {
+        const next = ds.filter((d) => d.expiresAt > stamp);
+        return next.length === ds.length ? ds : next;
+      });
+      setActivePowerUps((as) => {
+        const next = as.filter((a) => a.expiresAt > stamp);
+        return next.length === as.length ? as : next;
+      });
+    }, 250);
+    return () => clearInterval(t);
+  }, [hasTimers]);
 
   // --- soft-lock rescue ---
   // A blast that breaks no crate yields no pickup, so it is possible to spend
@@ -528,21 +633,45 @@ export function useBombermanGame() {
     const t = setInterval(() => {
       const now = Date.now();
 
-      setEnemies((es) => {
-        let changed = false;
-        const next = es.map((en) => {
-          if (
-            en.state === "dying" &&
-            en.dyingSince !== null &&
-            now - en.dyingSince >= DEATH_ANIM_MS
-          ) {
-            changed = true;
-            return { ...en, state: "dead" as const, dyingSince: null };
-          }
-          return en;
-        });
-        return changed ? next : es;
-      });
+      // Work out who has finished burning up front, so the drop roll happens
+      // out here rather than inside the updater (updaters must stay pure, and
+      // StrictMode double-invokes them -- which would double the drops).
+      const finished = enemiesRef.current.filter(
+        (en) =>
+          en.state === "dying" &&
+          en.dyingSince !== null &&
+          now - en.dyingSince >= DEATH_ANIM_MS
+      );
+      if (finished.length > 0) {
+        const doneIds = new Set(finished.map((en) => en.id));
+        setEnemies((es) =>
+          es.map((en) =>
+            doneIds.has(en.id)
+              ? { ...en, state: "dead" as const, dyingSince: null }
+              : en
+          )
+        );
+
+        // a third of them leave a power-up behind
+        const drops: PowerUpDrop[] = [];
+        for (const en of finished) {
+          const kind = rollEnemyDrop();
+          if (!kind) continue;
+          idCounter.current += 1;
+          drops.push({
+            id: idCounter.current,
+            x: en.x,
+            y: en.y,
+            kind,
+            expiresAt: now + POWERUP_MS,
+          });
+        }
+        if (drops.length > 0) {
+          const nextDrops = [...powerUpDropsRef.current, ...drops];
+          powerUpDropsRef.current = nextDrops;
+          setPowerUpDrops(nextDrops);
+        }
+      }
 
       const death = playerDeathRef.current;
       if (death && now - death.startedAt >= DEATH_ANIM_MS) {
@@ -551,6 +680,10 @@ export function useBombermanGame() {
         if (livesRef.current <= 0) {
           setStatus("lost");
         } else {
+          // teleport home: no slide, so contact tests don't tween across the board
+          playerRef.current = PLAYER_SPAWN;
+          playerFromRef.current = PLAYER_SPAWN;
+          playerMovedAtRef.current = 0;
           setPlayer(PLAYER_SPAWN);
           setRespawnKey((k) => k + 1);
         }
@@ -562,12 +695,17 @@ export function useBombermanGame() {
   const restart = useCallback(() => {
     const newGrid = makeGrid();
     setGrid(newGrid);
+    playerRef.current = PLAYER_SPAWN;
+    playerFromRef.current = PLAYER_SPAWN;
+    playerMovedAtRef.current = 0;
     setPlayer(PLAYER_SPAWN);
     setEnemies(makeEnemies(newGrid));
     setBombs([]);
     setBombsAvailable(MAX_BOMBS);
     setPickups([]);
     setCrateBreaks([]);
+    setPowerUpDrops([]);
+    setActivePowerUps([]);
     setRescueNotice(null);
     setExplosions([]);
     setLives(3);
@@ -585,6 +723,9 @@ export function useBombermanGame() {
     bombsAvailable,
     pickups,
     crateBreaks,
+    powerUpDrops,
+    activePowerUps,
+    now,
     rescueNotice,
     explosions,
     particles,

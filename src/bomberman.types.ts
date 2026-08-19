@@ -6,7 +6,13 @@ export const BOMB_FUSE_MS = 1800;
 export const EXPLOSION_MS = 500;
 export const ENEMY_MOVE_MS = 500;
 export const PLAYER_MOVE_MS = 120;
-export const BLAST_RANGE = 2;
+/** A regular blast reaches one tile out in each direction... */
+export const BLAST_RANGE = 1;
+/** ...and chews through at most one crate per arm. */
+export const BLAST_CRATES = 1;
+/** The "pierce" power-up doubles both: two tiles out, two crates deep. */
+export const PIERCE_BLAST_RANGE = 2;
+export const PIERCE_BLAST_CRATES = 2;
 /** Hard cap on bombs the player can carry -- fixed for the whole run, never raised by pickups. */
 export const MAX_BOMBS = 3;
 export const BOMB_PICKUP_CHANCE = 1 / 3;
@@ -33,6 +39,10 @@ export type Enemy = {
   dyingSince: number | null;
   /** last direction travelled, so the AI can keep its momentum */
   facing: { dx: number; dy: number } | null;
+  /** tile it is sliding out of, and when that slide began -- used for contact tests */
+  fromX: number;
+  fromY: number;
+  movedAt: number;
 };
 export type Pickup = { x: number; y: number; id: number };
 

@@ -21,6 +21,7 @@ export function AnimatedPixelSprite({
   size,
   durationMs,
   paused = false,
+  loop = true,
   style,
 }: {
   frames: readonly (readonly string[])[];
@@ -28,6 +29,8 @@ export function AnimatedPixelSprite({
   size: number;
   durationMs: number;
   paused?: boolean;
+  /** false plays the frames once and holds the last one -- used for the bomb fuse */
+  loop?: boolean;
   style?: React.CSSProperties;
 }) {
   if (paused || frames.length <= 1) {
@@ -40,7 +43,9 @@ export function AnimatedPixelSprite({
           display: "flex",
           width: size * frames.length,
           height: size,
-          animation: `px-sprite-strip ${durationMs}ms steps(${frames.length}) infinite`,
+          animation: `px-sprite-strip ${durationMs}ms steps(${frames.length}) ${
+            loop ? "infinite" : "1 forwards"
+          }`,
         }}
       >
         {frames.map((rows, i) => (

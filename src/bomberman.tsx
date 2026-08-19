@@ -1,6 +1,7 @@
 import React from "react";
 import "@fontsource/press-start-2p";
 import {
+  BOMB_FUSE_MS,
   CELL,
   COLS,
   DEATH_ANIM_MS,
@@ -13,9 +14,16 @@ import type { ExplosionCell } from "./bomberman.types";
 import { useBombermanGame } from "./useBombermanGame";
 import { CRATE_BREAK_MS, crateShards } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
+import { POWERUP_LABEL, secondsLeft } from "./powerUps";
+import type { PowerUpKind } from "./powerUps";
 import {
+  BLAST_ICON_COLORS,
+  BLAST_ICON_SPRITE,
   BOMB_COLORS,
+  BOMB_FUSE_FRAMES,
   BOMB_SPRITE,
+  STAR_COLORS,
+  STAR_SPRITE,
   ENEMY_COLORS,
   ENEMY_IDLE_FRAMES,
   ENEMY_IDLE_MS,
@@ -53,6 +61,49 @@ function panelStyle(): React.CSSProperties {
       `inset -3px -3px 0 ${PAL.panelLo}`,
     ].join(", "),
   };
+}
+
+const POWERUP_ART: Record<
+  PowerUpKind,
+  { rows: readonly string[]; palette: Record<string, string>; glow: string }
+> = {
+  invincible: { rows: STAR_SPRITE, palette: STAR_COLORS, glow: PAL.gold },
+  pierce: { rows: BLAST_ICON_SPRITE, palette: BLAST_ICON_COLORS, glow: PAL.fire2 },
+};
+
+/** One header slot: an icon, a label and the seconds ticking down beside it. */
+function PowerUpChip({
+  kind,
+  seconds,
+  active,
+}: {
+  kind: PowerUpKind;
+  seconds: number;
+  active: boolean;
+}) {
+  const art = POWERUP_ART[kind];
+  // running low reads red whether it's a drop about to vanish or an effect about to lapse
+  const urgent = seconds <= 5;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 6px",
+        fontSize: 8,
+        opacity: active ? 1 : 0.75,
+        boxShadow: `inset 0 0 0 1px ${active ? art.glow : PAL.panelHi}`,
+        animation: urgent ? "px-urgent 400ms steps(2) infinite alternate" : undefined,
+      }}
+    >
+      <PixelSprite rows={art.rows} palette={art.palette} size={14} />
+      <span style={{ color: active ? art.glow : PAL.uiDim }}>
+        {active ? POWERUP_LABEL[kind] : "DROP"}
+      </span>
+      <span style={{ color: urgent ? PAL.red : PAL.ui }}>{seconds}</span>
+    </div>
+  );
 }
 
 // Chunky embers that lick upward off whatever is being incinerated. Fixed
@@ -152,6 +203,9 @@ export default function Bomberman() {
     bombsAvailable,
     pickups,
     crateBreaks,
+    powerUpDrops,
+    activePowerUps,
+    now,
     rescueNotice,
     explosions,
     particles,
@@ -162,6 +216,8 @@ export default function Bomberman() {
     respawnKey,
     restart,
   } = useBombermanGame();
+
+  const isInvincible = activePowerUps.some((a) => a.kind === "invincible");
 
   const explodedMap = new Map<string, ExplosionCell>();
   explosions.forEach((e) =>
@@ -233,6 +289,40 @@ export default function Bomberman() {
           <span>{enemies.filter((e) => e.state === "alive").length}</span>
         </div>
       </div>
+
+      {/* ---- power-ups: drops waiting on the floor and effects in hand, both
+           counting down in the same strip ---- */}
+      {(powerUpDrops.length > 0 || activePowerUps.length > 0) && (
+        <div
+          style={{
+            ...panelStyle(),
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            width: COLS * CELL - 8,
+            boxSizing: "border-box",
+            flexWrap: "wrap",
+          }}
+        >
+          {activePowerUps.map((a) => (
+            <PowerUpChip
+              key={`active-${a.kind}`}
+              kind={a.kind}
+              seconds={secondsLeft(a.expiresAt, now)}
+              active
+            />
+          ))}
+          {powerUpDrops.map((d) => (
+            <PowerUpChip
+              key={`drop-${d.id}`}
+              kind={d.kind}
+              seconds={secondsLeft(d.expiresAt, now)}
+              active={false}
+            />
+          ))}
+        </div>
+      )}
 
       {/* ---- board ---- */}
       <div
@@ -312,9 +402,41 @@ export default function Bomberman() {
               animation: "px-bomb 500ms steps(2) infinite alternate",
             }}
           >
-            <PixelSprite rows={BOMB_SPRITE} palette={BOMB_COLORS} size={SPRITE_PX} />
+            {/* the fuse burns down across the bomb's whole fuse time, so the
+                spark reaching the cap lines up with it going off */}
+            <AnimatedPixelSprite
+              frames={BOMB_FUSE_FRAMES}
+              palette={BOMB_COLORS}
+              size={SPRITE_PX}
+              durationMs={BOMB_FUSE_MS}
+              loop={false}
+            />
           </div>
         ))}
+
+        {/* power-up drops */}
+        {powerUpDrops.map((d) => {
+          const art = POWERUP_ART[d.kind];
+          const expiring = secondsLeft(d.expiresAt, now) <= 5;
+          return (
+            <div
+              key={d.id}
+              style={{
+                position: "absolute",
+                left: d.x * CELL + SPRITE_INSET,
+                top: d.y * CELL + SPRITE_INSET,
+                zIndex: 1,
+                filter: `drop-shadow(0 0 5px ${art.glow})`,
+                // blinks out as its 30s runs down, so you know to hurry
+                animation: expiring
+                  ? "px-urgent 260ms steps(2) infinite alternate"
+                  : "px-bob 640ms steps(2) infinite alternate",
+              }}
+            >
+              <PixelSprite rows={art.rows} palette={art.palette} size={SPRITE_PX} />
+            </div>
+          );
+        })}
 
         {/* bomb pickups */}
         {pickups.map((pk) => (
@@ -382,7 +504,9 @@ export default function Bomberman() {
               : `left ${PLAYER_MOVE_MS}ms linear, top ${PLAYER_MOVE_MS}ms linear`,
             animation: playerDeath
               ? `${playerDeath.cause === "burn" ? "px-incinerate" : "px-struck"} ${DEATH_ANIM_MS}ms steps(10) forwards`
-              : undefined,
+              : isInvincible
+                ? "px-invincible 320ms steps(2) infinite alternate"
+                : undefined,
           }}
         >
           <AnimatedPixelSprite
@@ -622,6 +746,17 @@ export default function Bomberman() {
         @keyframes px-sprite-strip {
           from { transform: translateX(0); }
           to   { transform: translateX(-100%); }
+        }
+
+        /* invincible: the classic hard-flashing shield blink */
+        @keyframes px-invincible {
+          from { filter: none; }
+          to   { filter: brightness(2.4) saturate(1.6) drop-shadow(0 0 6px #ffd23d); }
+        }
+        /* a power-up timer about to run out */
+        @keyframes px-urgent {
+          from { opacity: 1; }
+          to   { opacity: 0.35; }
         }
 
         @keyframes px-toast {

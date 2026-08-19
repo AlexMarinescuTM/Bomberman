@@ -197,10 +197,10 @@ export const ENEMY_COLORS: Record<string, string> = {
   w: "#ffffff",
 };
 
-export const BOMB_SPRITE = [
-  "..........ss....",
-  ".........sf.....",
-  "........ff......",
+// The fuse burning down. Only the three fuse rows change between frames -- the
+// bomb body is identical throughout, so the casing sits perfectly still while
+// the spark eats its way toward the cap.
+const BOMB_BODY = [
   ".......cc.......",
   "......cccc......",
   ".....KKKKKK.....",
@@ -216,13 +216,43 @@ export const BOMB_SPRITE = [
   "................",
 ] as const;
 
+const bombFrame = (fuse: readonly string[]) => [...fuse, ...BOMB_BODY] as const;
+
+/** Freshly lit: full cord, flame burning at the far tip. */
+export const BOMB_SPRITE = bombFrame([
+  ".........sSs....",
+  "........ff......",
+  ".......f........",
+]);
+
+export const BOMB_FUSE_FRAMES = [
+  BOMB_SPRITE,
+  bombFrame([
+    "................",
+    "........sSs.....",
+    ".......f........",
+  ]),
+  bombFrame([
+    "................",
+    "................",
+    ".......sSs......",
+  ]),
+  // flame has burned down to the cap and flares -- about to go off
+  bombFrame([
+    "................",
+    "................",
+    "......sSSs......",
+  ]),
+] as const;
+
 export const BOMB_COLORS: Record<string, string> = {
   K: PAL.ink,
   d: "#2b2b3d",
   h: "#6d6d8c",
   c: "#d0a33c",
-  f: "#8a6a3a",
-  s: PAL.fire1,
+  f: "#7a5a30", // unlit cord, kept dark so the flame reads against it
+  s: PAL.fire2, // flame edge
+  S: PAL.fire0, // white-hot core
 };
 
 export const PICKUP_SPRITE = [
@@ -250,6 +280,56 @@ export const PICKUP_COLORS: Record<string, string> = {
   K: PAL.ink,
   d: "#2b2b3d",
   h: "#6d6d8c",
+};
+
+/** Invincibility: a five-point star. */
+export const STAR_SPRITE = [
+  "................",
+  ".......KK.......",
+  "......KssK......",
+  "......KssK......",
+  ".....KssssK.....",
+  "KKKKKssssssKKKKK",
+  "KssssssssssssssK",
+  ".KssssssssssssK.",
+  "..KssssssssssK..",
+  "...KssssssssK...",
+  "...KsssKKsssK...",
+  "..KsssK..KsssK..",
+  ".KsssK....KsssK.",
+  ".KssK......KssK.",
+  ".KKK........KKK.",
+  "................",
+] as const;
+
+export const STAR_COLORS: Record<string, string> = {
+  K: PAL.ink,
+  s: PAL.gold,
+};
+
+/** Pierce: the cross a blast carves out, with the arms flared so it reads as a burst. */
+export const BLAST_ICON_SPRITE = [
+  "................",
+  "................",
+  ".....KKKKKK.....",
+  ".....KffffK.....",
+  "......KffK......",
+  "..KKKKKffKKKKK..",
+  "..KffffffffffK..",
+  ".KffffffffffffK.",
+  "..KffffffffffK..",
+  "..KKKKKffKKKKK..",
+  "......KffK......",
+  ".....KffffK.....",
+  ".....KKKKKK.....",
+  "................",
+  "................",
+  "................",
+] as const;
+
+export const BLAST_ICON_COLORS: Record<string, string> = {
+  K: PAL.ink,
+  f: PAL.fire2,
 };
 
 export const HEART_SPRITE = [
