@@ -1,4 +1,23 @@
-import type { Pos } from "./bomberman.types";
+import type { CellType, Pos } from "./bomberman.types";
+
+/**
+ * Whether anything may step onto a tile: it has to be open floor with no bomb
+ * sitting on it. Shared by the player and the enemies so the two can never
+ * disagree about what is passable -- the player used to skip the bomb half of
+ * this check and could walk straight through a live bomb.
+ *
+ * Note this only blocks *entering* a bomb tile. Someone already standing on one
+ * (having just placed it) can still step off, which is the classic behaviour.
+ */
+export function isTileWalkable(
+  grid: readonly CellType[][],
+  bombs: readonly Pos[],
+  x: number,
+  y: number
+): boolean {
+  if (grid[y]?.[x] !== "empty") return false;
+  return !bombs.some((b) => b.x === x && b.y === y);
+}
 
 // ---------------------------------------------------------------------------
 // Player/enemy contact.

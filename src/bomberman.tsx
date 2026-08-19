@@ -214,6 +214,7 @@ export default function Bomberman() {
     flash,
     playerDeath,
     respawnKey,
+    roundKey,
     restart,
   } = useBombermanGame();
 
@@ -460,7 +461,10 @@ export default function Bomberman() {
           .map((e) => {
             const burning = e.state === "dying";
             return (
-              <React.Fragment key={e.id}>
+              // keyed by round as well as id: enemy ids repeat every round, so
+              // without this the reused DOM node would glide from last round's
+              // position to the new spawn instead of just appearing there
+              <React.Fragment key={`${roundKey}-${e.id}`}>
                 <div
                   style={{
                     position: "absolute",

@@ -32,8 +32,9 @@ import {
 } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
 import { chooseEnemyMove } from "./enemyAI";
+import type { Dir } from "./enemyAI";
 import { clearCrates, computeBlast } from "./blast";
-import { isCaught, tweenPos } from "./collision";
+import { isCaught, isTileWalkable, tweenPos } from "./collision";
 import {
   POWERUP_MS,
   applyPowerUp,
@@ -75,6 +76,9 @@ export function useBombermanGame() {
   // board on its movement transition.
   const [playerDeath, setPlayerDeath] = useState<PlayerDeath>(null);
   const [respawnKey, setRespawnKey] = useState(0);
+  // bumped once per round, so a restart remounts the entities instead of letting
+  // them slide across the board from where the previous round left them
+  const [roundKey, setRoundKey] = useState(0);
   const idCounter = useRef(0);
   const gridRef = useRef(grid);
   gridRef.current = grid;
@@ -115,7 +119,7 @@ export function useBombermanGame() {
     const p = playerRef.current;
     const nx = p.x + dir.dx;
     const ny = p.y + dir.dy;
-    if (gridRef.current[ny]?.[nx] !== "empty") return;
+    if (!isTileWalkable(gridRef.current, bombsRef.current, nx, ny)) return;
     // record the slide (and keep the ref current) so contact tests can work out
     // where the player actually is mid-glide
     playerFromRef.current = { x: p.x, y: p.y };
@@ -157,7 +161,13 @@ export function useBombermanGame() {
     const p = playerRef.current;
     if (bombsRef.current.some((b) => b.x === p.x && b.y === p.y)) return;
     idCounter.current += 1;
-    setBombs((bs) => [...bs, { x: p.x, y: p.y, id: idCounter.current, placedAt: Date.now() }]);
+    const bomb = { x: p.x, y: p.y, id: idCounter.current, placedAt: Date.now() };
+    // Publish to the ref synchronously. The enemy AI ticks off bombsRef, so
+    // leaving this until the next render opened a window where an enemy could
+    // decide its move against a board that did not yet contain this bomb --
+    // and walk straight onto it.
+    bombsRef.current = [...bombsRef.current, bomb];
+    setBombs((bs) => [...bs, bomb]);
     setBombsAvailable((n) => n - 1);
   }, []);
 
@@ -466,6 +476,7 @@ export function useBombermanGame() {
   useEffect(() => {
     if (bombs.length === 0) return;
     const t = setInterval(() => {
+      if (statusRef.current !== "playing") return; // round's over; leave them be
       const now = Date.now();
       const ready = bombsRef.current.filter((b) => now - b.placedAt >= BOMB_FUSE_MS);
       if (ready.length === 0) return;
@@ -486,19 +497,28 @@ export function useBombermanGame() {
       const grid = gridRef.current;
       const liveBombs = bombsRef.current;
       const target = playerRef.current;
-      const isOpen = (x: number, y: number) =>
-        grid[y]?.[x] === "empty" && !liveBombs.some((b) => b.x === x && b.y === y);
+      const isOpen = (x: number, y: number) => isTileWalkable(grid, liveBombs, x, y);
+
+      // Decide out here, not inside the updater. chooseEnemyMove rolls dice, and
+      // updaters must be pure -- StrictMode double-invokes them, so the AI was
+      // deciding twice per tick against two different random draws.
+      const moves = new Map<number, Dir>();
+      for (const en of enemiesRef.current) {
+        if (en.state !== "alive") continue; // dying enemies burn where they stand
+        const step = chooseEnemyMove({
+          pos: { x: en.x, y: en.y },
+          facing: en.facing,
+          target,
+          isOpen,
+        });
+        if (step) moves.set(en.id, step); // no step == walled in
+      }
+      if (moves.size === 0) return;
 
       setEnemies((es) =>
         es.map((en) => {
-          if (en.state !== "alive") return en; // dying enemies burn where they stand
-          const step = chooseEnemyMove({
-            pos: { x: en.x, y: en.y },
-            facing: en.facing,
-            target,
-            isOpen,
-          });
-          if (!step) return en; // walled in
+          const step = en.state === "alive" ? moves.get(en.id) : undefined;
+          if (!step) return en;
           return {
             ...en,
             x: en.x + step.dx,
@@ -693,13 +713,31 @@ export function useBombermanGame() {
   }, [playerDeath, hasDyingEnemy]);
 
   const restart = useCallback(() => {
-    const newGrid = makeGrid();
-    setGrid(newGrid);
+    const newGrid = makeGrid(); // fresh procedural board every round
+    const newEnemies = makeEnemies(newGrid);
+
+    // Every ref is re-pointed synchronously, not just left to the next render.
+    // Timers already in flight (the bomb fuse, the enemy AI, the contact check)
+    // read these refs, and a tick landing in the gap would otherwise act on the
+    // previous round -- including detonating a leftover bomb against the *old*
+    // grid and writing that stale board straight back over the new one.
+    gridRef.current = newGrid;
+    enemiesRef.current = newEnemies;
+    bombsRef.current = [];
+    pickupsRef.current = [];
+    powerUpDropsRef.current = [];
+    activePowerUpsRef.current = [];
+    bombsAvailableRef.current = MAX_BOMBS;
+    livesRef.current = 3;
     playerRef.current = PLAYER_SPAWN;
     playerFromRef.current = PLAYER_SPAWN;
     playerMovedAtRef.current = 0;
+    playerDeathRef.current = null;
+    statusRef.current = "playing";
+
+    setGrid(newGrid);
     setPlayer(PLAYER_SPAWN);
-    setEnemies(makeEnemies(newGrid));
+    setEnemies(newEnemies);
     setBombs([]);
     setBombsAvailable(MAX_BOMBS);
     setPickups([]);
@@ -708,10 +746,13 @@ export function useBombermanGame() {
     setActivePowerUps([]);
     setRescueNotice(null);
     setExplosions([]);
+    setParticles([]);
     setLives(3);
-    playerDeathRef.current = null;
     setPlayerDeath(null);
     setRespawnKey((k) => k + 1);
+    // bumps the render keys so entities remount at their spawns rather than
+    // gliding there from wherever the last round left them
+    setRoundKey((k) => k + 1);
     setStatus("playing");
   }, []);
 
@@ -734,6 +775,7 @@ export function useBombermanGame() {
     flash,
     playerDeath,
     respawnKey,
+    roundKey,
     restart,
   };
 }
