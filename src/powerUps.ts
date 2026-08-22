@@ -6,16 +6,21 @@ import {
 } from "./bomberman.types";
 
 // ---------------------------------------------------------------------------
-// Power-ups dropped by dying enemies.
+// Power-ups dropped by dying enemies and by destroyed crates.
 //   invincible -- nothing can kill the player
 //   pierce     -- blasts reach further and punch through a second crate
+//   kick       -- walking into a live bomb sends it sliding (see bombKick.ts)
 // Both the drop lying on the floor and the effect once collected run on the
-// same 30 second clock.
+// same 30 second clock, and they stack: holding all three is fine.
 // ---------------------------------------------------------------------------
 
-export type PowerUpKind = "invincible" | "pierce";
+export type PowerUpKind = "invincible" | "pierce" | "kick";
 
-export const POWERUP_KINDS: readonly PowerUpKind[] = ["invincible", "pierce"];
+export const POWERUP_KINDS: readonly PowerUpKind[] = [
+  "invincible",
+  "pierce",
+  "kick",
+];
 
 /** How long a drop waits to be collected, and how long its effect then lasts. */
 export const POWERUP_MS = 30000;
@@ -26,6 +31,7 @@ export const ENEMY_DROP_CHANCE = 1 / 3;
 export const POWERUP_LABEL: Record<PowerUpKind, string> = {
   invincible: "SHIELD",
   pierce: "BLAST",
+  kick: "KICK",
 };
 
 /** A power-up sitting on the floor waiting to be walked over. */

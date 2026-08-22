@@ -12,6 +12,7 @@ import {
 } from "./bomberman.types";
 import type { ExplosionCell } from "./bomberman.types";
 import { useBombermanGame } from "./useBombermanGame";
+import { BOMB_KICK_MS } from "./bombKick";
 import { CRATE_BREAK_MS, crateShards } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
 import { POWERUP_LABEL, secondsLeft } from "./powerUps";
@@ -22,6 +23,8 @@ import {
   BOMB_COLORS,
   BOMB_FUSE_FRAMES,
   BOMB_SPRITE,
+  BOOT_COLORS,
+  BOOT_SPRITE,
   STAR_COLORS,
   STAR_SPRITE,
   ENEMY_COLORS,
@@ -69,6 +72,7 @@ const POWERUP_ART: Record<
 > = {
   invincible: { rows: STAR_SPRITE, palette: STAR_COLORS, glow: PAL.gold },
   pierce: { rows: BLAST_ICON_SPRITE, palette: BLAST_ICON_COLORS, glow: PAL.fire2 },
+  kick: { rows: BOOT_SPRITE, palette: BOOT_COLORS, glow: PAL.cyan },
 };
 
 /** One header slot: an icon, a label and the seconds ticking down beside it. */
@@ -400,6 +404,9 @@ export default function Bomberman() {
               left: b.x * CELL + SPRITE_INSET,
               top: b.y * CELL + SPRITE_INSET,
               zIndex: 2,
+              // a kicked bomb glides between tiles on exactly the tick length
+              // the kick loop advances it by, so the slide reads as continuous
+              transition: `left ${BOMB_KICK_MS}ms linear, top ${BOMB_KICK_MS}ms linear`,
               animation: "px-bomb 500ms steps(2) infinite alternate",
             }}
           >

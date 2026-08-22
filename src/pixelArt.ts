@@ -35,6 +35,7 @@ export const PAL = {
   gold: "#ffd23d",
   green: "#67e07a",
   red: "#e8455a",
+  cyan: "#5ad2ff",
 
   fire0: "#fff6d6",
   fire1: "#ffd93d",
@@ -330,6 +331,35 @@ export const BLAST_ICON_SPRITE = [
 export const BLAST_ICON_COLORS: Record<string, string> = {
   K: PAL.ink,
   f: PAL.fire2,
+};
+
+/** Bomb kick: a boot swinging right, with speed lines trailing off its heel. */
+export const BOOT_SPRITE = [
+  "................",
+  "...KKKKKKK......",
+  "...KCCCCCK......",
+  "...KCCCCCK......",
+  "...KhbbbbK......",
+  "ss.KhbbbbK......",
+  "...KhbbbbK......",
+  "...KhbbbbKK.....",
+  "ss.KhbbbbbbK....",
+  "...KhbbbbbbbbK..",
+  "...KhbbbbbbbbbbK",
+  "...KBBBBBBBBBBBK",
+  "...KKK..KKKKKKKK",
+  "................",
+  "................",
+  "................",
+] as const;
+
+export const BOOT_COLORS: Record<string, string> = {
+  K: PAL.ink,
+  b: PAL.cyan,
+  C: "#9be6ff", // cuff band round the top
+  h: "#c9f1ff", // highlight down the front of the shaft
+  B: "#2b7fae", // sole, in shadow
+  s: PAL.gold, // speed lines trailing off the heel
 };
 
 export const HEART_SPRITE = [
