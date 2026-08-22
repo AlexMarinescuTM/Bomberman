@@ -24,15 +24,16 @@ import type {
   Pos,
 } from "./bomberman.types";
 import { makeEnemies, makeGrid } from "./gridGeneration";
-import { choosePickupSpots } from "./bombPickups";
+import { chooseCrateDrops } from "./bombPickups";
 import {
   CRATE_BREAK_MS,
   crateDebrisSpec,
   crateVariantFor,
 } from "./crateBreaks";
 import type { CrateBreak } from "./crateBreaks";
-import { chooseEnemyMove } from "./enemyAI";
+import { chooseEnemyMove, recoilFromTile } from "./enemyAI";
 import type { Dir } from "./enemyAI";
+import { BOMB_KICK_MS, advanceKickedBombs, kickBombAt } from "./bombKick";
 import { clearCrates, computeBlast } from "./blast";
 import { isCaught, isTileWalkable, tweenPos } from "./collision";
 import {
@@ -119,6 +120,20 @@ export function useBombermanGame() {
     const p = playerRef.current;
     const nx = p.x + dir.dx;
     const ny = p.y + dir.dy;
+
+    // Walking into a bomb: with the kick power-up in hand it gets booted away
+    // in the direction of travel, otherwise it blocks as usual. Either way the
+    // player stays put this step -- they follow the bomb on the next one.
+    if (bombsRef.current.some((b) => b.x === nx && b.y === ny)) {
+      if (!hasPowerUp(activePowerUpsRef.current, "kick")) return;
+      const kicked = kickBombAt(bombsRef.current, { x: nx, y: ny }, dir);
+      if (kicked) {
+        bombsRef.current = kicked; // published synchronously: the kick tick reads this
+        setBombs(kicked);
+      }
+      return;
+    }
+
     if (!isTileWalkable(gridRef.current, bombsRef.current, nx, ny)) return;
     // record the slide (and keep the ref current) so contact tests can work out
     // where the player actually is mid-glide
@@ -161,7 +176,13 @@ export function useBombermanGame() {
     const p = playerRef.current;
     if (bombsRef.current.some((b) => b.x === p.x && b.y === p.y)) return;
     idCounter.current += 1;
-    const bomb = { x: p.x, y: p.y, id: idCounter.current, placedAt: Date.now() };
+    const bomb: Bomb = {
+      x: p.x,
+      y: p.y,
+      id: idCounter.current,
+      placedAt: Date.now(),
+      dir: null,
+    };
     // Publish to the ref synchronously. The enemy AI ticks off bombsRef, so
     // leaving this until the next render opened a window where an enemy could
     // decide its move against a board that did not yet contain this bomb --
@@ -169,6 +190,21 @@ export function useBombermanGame() {
     bombsRef.current = [...bombsRef.current, bomb];
     setBombs((bs) => [...bs, bomb]);
     setBombsAvailable((n) => n - 1);
+
+    // An enemy that had already committed to this tile is mid-slide onto it and
+    // would finish standing on the bomb, so turn it back. Checking walkability
+    // at decision time cannot catch this on its own -- the bomb did not exist
+    // when the enemy chose.
+    const recoiled = recoilFromTile(
+      enemiesRef.current,
+      { x: p.x, y: p.y },
+      bomb.placedAt,
+      (x, y) => isTileWalkable(gridRef.current, bombsRef.current, x, y)
+    );
+    if (recoiled !== enemiesRef.current) {
+      enemiesRef.current = recoiled as Enemy[];
+      setEnemies(recoiled as Enemy[]);
+    }
   }, []);
 
   // --- keyboard: movement keys step immediately and then auto-repeat while held; space places a bomb ---
@@ -435,13 +471,18 @@ export function useBombermanGame() {
     // enemies caught in the blast start incinerating; the sweeper removes them
     // once the animation has run its course
     const killedAt = Date.now();
-    setEnemies((es) =>
-      es.map((en) =>
-        en.state === "alive" && cells.some((c) => c.x === en.x && c.y === en.y)
-          ? { ...en, state: "dying" as const, dyingSince: killedAt }
-          : en
-      )
-    );
+    let anyKilled = false;
+    const nextEnemies = enemiesRef.current.map((en) => {
+      if (en.state !== "alive") return en;
+      if (!cells.some((c) => c.x === en.x && c.y === en.y)) return en;
+      anyKilled = true;
+      return { ...en, state: "dying" as const, dyingSince: killedAt };
+    });
+    if (anyKilled) {
+      // synchronous, like every other write to this ref -- see the enemy AI tick
+      enemiesRef.current = nextEnemies;
+      setEnemies(nextEnemies);
+    }
 
     // Any pickup standing in this blast is consumed by the fire -- work out the
     // survivors first, because that determines whether the player is about to be
@@ -450,16 +491,37 @@ export function useBombermanGame() {
       (pk) => !cells.some((c) => c.x === pk.x && c.y === pk.y)
     );
 
-    // Roll for drops, including the guaranteed one when the player would
-    // otherwise be left with no way of ever getting another bomb.
-    const newPickups: Pickup[] = choosePickupSpots({
+    // Roll each destroyed crate for a spare bomb or a power-up, including the
+    // guaranteed bomb when the player would otherwise be left with no way of
+    // ever getting another one.
+    const crateDrops = chooseCrateDrops({
       brickCells: cells.filter((c) => c.wasBrick),
       survivingPickupCount: survivingPickups.length,
       bombsAvailable: bombsAvailableRef.current,
-    }).map((spot) => {
-      idCounter.current += 1;
-      return { x: spot.x, y: spot.y, id: idCounter.current };
     });
+
+    const newPickups: Pickup[] = [];
+    const cratePowerUps: PowerUpDrop[] = [];
+    const droppedAt = Date.now();
+    for (const drop of crateDrops) {
+      idCounter.current += 1;
+      if (drop.kind === "bomb") {
+        newPickups.push({ x: drop.x, y: drop.y, id: idCounter.current });
+      } else {
+        cratePowerUps.push({
+          id: idCounter.current,
+          x: drop.x,
+          y: drop.y,
+          kind: drop.kind,
+          expiresAt: droppedAt + POWERUP_MS,
+        });
+      }
+    }
+    if (cratePowerUps.length > 0) {
+      const nextDrops = [...powerUpDropsRef.current, ...cratePowerUps];
+      powerUpDropsRef.current = nextDrops;
+      setPowerUpDrops(nextDrops);
+    }
 
     // Keep the ref in step synchronously: several bombs can detonate within the
     // same tick, and each needs to see what the previous one already dropped.
@@ -488,6 +550,37 @@ export function useBombermanGame() {
     return () => clearInterval(t);
   }, [bombs.length, detonate]);
 
+  // --- kicked bombs: slide a tile at a time until something stops them ---
+  // Runs off bombsRef rather than state so a kick landing between renders is
+  // picked up on the very next tick. Nothing here touches placedAt, so a bomb
+  // being kicked around still goes off exactly BOMB_FUSE_MS after it was laid.
+  useEffect(() => {
+    if (bombs.length === 0) return;
+    const t = setInterval(() => {
+      if (statusRef.current !== "playing") return;
+      const grid = gridRef.current;
+      const p = playerRef.current;
+
+      // Only the static world is judged here -- bomb-versus-bomb is settled
+      // inside advanceKickedBombs, which has to weigh every slide together.
+      // enemiesRef is authoritative: every path that moves an enemy publishes
+      // to it synchronously, so this cannot read a stale tile and drop a bomb
+      // on someone.
+      const next = advanceKickedBombs(bombsRef.current, (_bomb, x, y) => {
+        if (grid[y]?.[x] !== "empty") return false; // wall, crate or off the board
+        if (p.x === x && p.y === y) return false; // never rolls over the player
+        return !enemiesRef.current.some(
+          (en) => en.state === "alive" && en.x === x && en.y === y
+        );
+      });
+      if (!next) return; // nothing sliding
+
+      bombsRef.current = next; // synchronous: the enemy AI reads this same tick
+      setBombs(next);
+    }, BOMB_KICK_MS);
+    return () => clearInterval(t);
+  }, [bombs.length]);
+
   // --- enemy AI: momentum patrol that hunts a quarter of the time ---
   useEffect(() => {
     if (status !== "playing") return;
@@ -515,21 +608,26 @@ export function useBombermanGame() {
       }
       if (moves.size === 0) return;
 
-      setEnemies((es) =>
-        es.map((en) => {
-          const step = en.state === "alive" ? moves.get(en.id) : undefined;
-          if (!step) return en;
-          return {
-            ...en,
-            x: en.x + step.dx,
-            y: en.y + step.dy,
-            facing: step,
-            fromX: en.x,
-            fromY: en.y,
-            movedAt: steppedAt,
-          };
-        })
-      );
+      // Published synchronously rather than left to a state updater. Timers that
+      // run between renders read enemiesRef -- notably the kick tick, which asks
+      // "is an enemy standing here?" before sliding a bomb onto a tile. Leaving
+      // the move until the next render opened a window where that answer was one
+      // step out of date and a bomb could be slid onto an enemy.
+      const nextEnemies = enemiesRef.current.map((en) => {
+        const step = en.state === "alive" ? moves.get(en.id) : undefined;
+        if (!step) return en;
+        return {
+          ...en,
+          x: en.x + step.dx,
+          y: en.y + step.dy,
+          facing: step,
+          fromX: en.x,
+          fromY: en.y,
+          movedAt: steppedAt,
+        };
+      });
+      enemiesRef.current = nextEnemies;
+      setEnemies(nextEnemies);
     }, ENEMY_MOVE_MS);
     return () => clearInterval(t);
   }, [status]);
@@ -664,13 +762,13 @@ export function useBombermanGame() {
       );
       if (finished.length > 0) {
         const doneIds = new Set(finished.map((en) => en.id));
-        setEnemies((es) =>
-          es.map((en) =>
-            doneIds.has(en.id)
-              ? { ...en, state: "dead" as const, dyingSince: null }
-              : en
-          )
+        const swept = enemiesRef.current.map((en) =>
+          doneIds.has(en.id)
+            ? { ...en, state: "dead" as const, dyingSince: null }
+            : en
         );
+        enemiesRef.current = swept; // synchronous, as everywhere else
+        setEnemies(swept);
 
         // a third of them leave a power-up behind
         const drops: PowerUpDrop[] = [];

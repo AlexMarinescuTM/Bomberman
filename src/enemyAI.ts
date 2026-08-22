@@ -1,4 +1,4 @@
-import type { Pos } from "./bomberman.types";
+import type { Enemy, Pos } from "./bomberman.types";
 
 export type Dir = { dx: number; dy: number };
 
@@ -122,4 +122,44 @@ export function chooseEnemyMove({
     sideTurns.length > 0 ? sideTurns : notBackwards.length > 0 ? notBackwards : options;
 
   return pool[Math.min(pool.length - 1, Math.floor(roll() * pool.length))];
+}
+
+/**
+ * Sends any enemy heading into `tile` back the way it came.
+ *
+ * An enemy's logical position jumps to its destination the moment it decides to
+ * move -- only the sprite interpolates over the next half second. So checking
+ * "is this tile free?" at decision time is not enough on its own: a bomb dropped
+ * onto a tile an enemy has *already committed to* would leave it finishing its
+ * slide standing on top of the bomb. Reversing the move keeps the invariant that
+ * nothing ever occupies a bomb tile.
+ *
+ * An enemy whose origin is no longer safe is left where it is -- better to let
+ * it step off normally on its next tick than to shove it somewhere worse.
+ * Returns the original array unchanged when nothing recoils.
+ */
+export function recoilFromTile(
+  enemies: readonly Enemy[],
+  tile: Pos,
+  now: number,
+  canStand: (x: number, y: number) => boolean
+): readonly Enemy[] {
+  let changed = false;
+  const next = enemies.map((en) => {
+    if (en.state !== "alive") return en;
+    if (en.x !== tile.x || en.y !== tile.y) return en;
+    if (en.fromX === en.x && en.fromY === en.y) return en; // already settled
+    if (!canStand(en.fromX, en.fromY)) return en;
+    changed = true;
+    return {
+      ...en,
+      x: en.fromX,
+      y: en.fromY,
+      fromX: en.x,
+      fromY: en.y,
+      movedAt: now,
+      facing: { dx: en.fromX - en.x, dy: en.fromY - en.y },
+    };
+  });
+  return changed ? next : enemies;
 }

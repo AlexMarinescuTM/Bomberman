@@ -2,7 +2,7 @@
 export const COLS = 13;
 export const ROWS = 11;
 export const CELL = 40;
-export const BOMB_FUSE_MS = 1800;
+export const BOMB_FUSE_MS = 1500;
 export const EXPLOSION_MS = 500;
 export const ENEMY_MOVE_MS = 500;
 export const PLAYER_MOVE_MS = 120;
@@ -15,7 +15,16 @@ export const PIERCE_BLAST_RANGE = 2;
 export const PIERCE_BLAST_CRATES = 2;
 /** Hard cap on bombs the player can carry -- fixed for the whole run, never raised by pickups. */
 export const MAX_BOMBS = 3;
-export const BOMB_PICKUP_CHANCE = 1 / 3;
+/**
+ * Odds a destroyed crate leaves *anything* behind. This is the rate for the
+ * whole set of drops, not per item: bomb ammo and every power-up share this one
+ * roll, so adding another power-up kind can never push a crate's drop rate up.
+ */
+export const CRATE_DROP_CHANCE = 1 / 3;
+/** How much of that roll goes to bomb ammo rather than a power-up. */
+export const CRATE_BOMB_SHARE = 0.5;
+/** Derived, so the two can never drift apart: ammo is half of the one drop roll. */
+export const BOMB_PICKUP_CHANCE = CRATE_DROP_CHANCE * CRATE_BOMB_SHARE;
 /** How long a death animation plays before the player respawns / an enemy vanishes. */
 export const DEATH_ANIM_MS = 2000;
 /** How long the player must be truly stuck (no bombs, none ticking, nothing to collect) before a free bomb is granted. */
@@ -26,7 +35,20 @@ export const PLAYER_SPAWN: Pos = { x: 1, y: 1 };
 
 export type CellType = "empty" | "wall" | "brick";
 export type Pos = { x: number; y: number };
-export type Bomb = { x: number; y: number; id: number; placedAt: number };
+export type Bomb = {
+  x: number;
+  y: number;
+  id: number;
+  /** when the fuse was lit -- a kick never touches this, so kicking cannot buy time */
+  placedAt: number;
+  /**
+   * Direction it is sliding after being kicked; null when it is sitting still.
+   * There is deliberately no from/movedAt pair here as there is on Enemy: a
+   * bomb's slide is drawn purely by a CSS transition on left/top and nothing
+   * ever needs its interpolated position, so carrying one would be dead state.
+   */
+  dir: { dx: number; dy: number } | null;
+};
 export type ExplosionCell = { x: number; y: number; delay: number; wasBrick: boolean };
 export type Explosion = { cells: ExplosionCell[]; id: number };
 /** "dying" enemies are mid-incineration: still drawn, but harmless and frozen. */
