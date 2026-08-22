@@ -281,6 +281,8 @@ export const PICKUP_COLORS: Record<string, string> = {
   K: PAL.ink,
   d: "#2b2b3d",
   h: "#6d6d8c",
+  c: "#d0a33c", // bomb cap, matching BOMB_COLORS
+  s: PAL.fire2, // flame, matching BOMB_COLORS
 };
 
 /** Invincibility: a five-point star. */
