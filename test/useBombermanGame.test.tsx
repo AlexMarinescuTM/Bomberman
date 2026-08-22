@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -145,28 +144,70 @@ describe("bomb -> fuse -> detonation", () => {
 });
 
 describe("restart", () => {
-  it("mid-fuse: the stale bomb never detonates against the fresh board", () => {
+  it("a fuse tick landing mid-restart cannot detonate against the fresh board", () => {
+    // The board the stale bomb belongs to has a crate; the fresh one has none.
+    // So if the stale bomb ever detonates, it computes its blast against the
+    // OLD grid and writes that whole stale board back via setGrid -- the crate
+    // reappearing is the visible symptom of exactly that bug.
     const staleGrid = testGrid([{ x: 1, y: 1 }, { x: 2, y: 1, brick: true }]);
-    const freshGrid = testGrid([{ x: 1, y: 1 }]); // deliberately no crate, so any clear would be a bug
+    const freshGrid = testGrid([{ x: 1, y: 1 }]);
     vi.mocked(makeGrid).mockReturnValueOnce(staleGrid).mockReturnValue(freshGrid);
     vi.mocked(makeEnemies).mockReturnValue(testEnemies());
 
     const { result } = renderHook(() => useBombermanGame());
     pressSpace();
-
-    act(() => vi.advanceTimersByTime(BOMB_FUSE_MS - 500)); // well before it would go off
+    act(() => vi.advanceTimersByTime(BOMB_FUSE_MS - 200)); // still ticking
     expect(result.current.bombs).toHaveLength(1);
 
-    act(() => result.current.restart());
-    expect(result.current.grid).toEqual(freshGrid);
+    const computeBlastSpy = vi.spyOn(blast, "computeBlast");
+
+    // The race, reproduced deterministically. restart() re-points its refs
+    // synchronously, but React has not yet committed the resulting state, so
+    // the fuse effect's cleanup has NOT run and its 100ms interval is still
+    // live. Advancing the clock inside the *same* act() fires that interval in
+    // precisely the window restart() has to defend -- whereas advancing it in a
+    // later act() lets React tear the interval down first, which is why this
+    // assertion used to hold even with restart()'s ref updates deleted.
+    act(() => {
+      result.current.restart();
+      vi.advanceTimersByTime(400); // now past BOMB_FUSE_MS for the stale bomb
+    });
+
+    // The stale bomb was dropped from bombsRef, so the tick found nothing ready.
+    expect(computeBlastSpy).not.toHaveBeenCalled();
     expect(result.current.bombs).toHaveLength(0);
     expect(result.current.bombsAvailable).toBe(MAX_BOMBS);
+    // and the freshly generated board is intact -- no crate resurrected
+    expect(result.current.grid).toEqual(freshGrid);
+    expect(result.current.grid[1][2]).toBe("wall");
+  });
 
-    // advance well past when the stale bomb would have gone off
-    act(() => vi.advanceTimersByTime(BOMB_FUSE_MS + 500));
+  it("judges movement against the new board, not the one that was replaced", () => {
+    // (2,1) is open on the old board and a wall on the new one. Movement is
+    // checked against gridRef, which restart() re-points synchronously -- if it
+    // did not, the player would walk straight into a wall of the live board.
+    const staleGrid = testGrid([{ x: 1, y: 1 }, { x: 2, y: 1 }]);
+    const freshGrid = testGrid([{ x: 1, y: 1 }]);
+    vi.mocked(makeGrid).mockReturnValueOnce(staleGrid).mockReturnValue(freshGrid);
+    vi.mocked(makeEnemies).mockReturnValue(testEnemies());
 
-    expect(result.current.bombs).toHaveLength(0); // nothing leaked through
-    expect(result.current.grid).toEqual(freshGrid); // fresh board survives untouched
+    const { result } = renderHook(() => useBombermanGame());
+    pressKeyTap("ArrowRight"); // legal on the old board
+    expect(result.current.player).toEqual({ x: 2, y: 1 });
+
+    // Same window as the fuse test: the keypress is dispatched inside the same
+    // act() as restart(), before React re-renders. `gridRef.current = grid` on
+    // the render path has therefore not run yet, so the only thing standing
+    // between the player and a wall of the new board is restart() having
+    // re-pointed gridRef synchronously.
+    act(() => {
+      result.current.restart();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight" }));
+    });
+
+    expect(result.current.player).toEqual({ x: 1, y: 1 }); // refused, stayed at spawn
+    expect(result.current.grid[1][2]).toBe("wall");
   });
 
   it("resets the player, lives, and round key", () => {

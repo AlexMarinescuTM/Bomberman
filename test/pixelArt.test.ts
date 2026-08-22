@@ -3,16 +3,19 @@ import {
   BLAST_ICON_COLORS,
   BLAST_ICON_SPRITE,
   BOMB_COLORS,
+  BOMB_FUSE_FRAMES,
   BOMB_SPRITE,
   BOOT_COLORS,
   BOOT_SPRITE,
   ENEMY_COLORS,
+  ENEMY_IDLE_FRAMES,
   ENEMY_SPRITE,
   HEART_COLORS,
   HEART_SPRITE,
   PICKUP_COLORS,
   PICKUP_SPRITE,
   PLAYER_COLORS,
+  PLAYER_IDLE_FRAMES,
   PLAYER_SPRITE,
   STAR_COLORS,
   STAR_SPRITE,
@@ -22,6 +25,16 @@ import {
 // glyph it uses must resolve to a real colour -- otherwise it silently renders
 // as a transparent hole. This is a cheap, generic safety net for any sprite
 // added later, not just the ones listed here.
+// Animation frames are each authored by hand and are the likeliest place for a
+// stray glyph to slip in, so every frame is checked individually rather than
+// just the base sprite -- that is exactly the bug class this suite exists for.
+const frames = (
+  name: string,
+  set: readonly (readonly string[])[],
+  palette: Record<string, string>
+): [string, readonly string[], Record<string, string>][] =>
+  set.map((rows, i) => [`${name}[${i}]`, rows, palette]);
+
 const SPRITES: [string, readonly string[], Record<string, string>][] = [
   ["PLAYER", PLAYER_SPRITE, PLAYER_COLORS],
   ["ENEMY", ENEMY_SPRITE, ENEMY_COLORS],
@@ -31,6 +44,9 @@ const SPRITES: [string, readonly string[], Record<string, string>][] = [
   ["BLAST_ICON", BLAST_ICON_SPRITE, BLAST_ICON_COLORS],
   ["BOOT", BOOT_SPRITE, BOOT_COLORS],
   ["HEART", HEART_SPRITE, HEART_COLORS],
+  ...frames("PLAYER_IDLE", PLAYER_IDLE_FRAMES, PLAYER_COLORS),
+  ...frames("ENEMY_IDLE", ENEMY_IDLE_FRAMES, ENEMY_COLORS),
+  ...frames("BOMB_FUSE", BOMB_FUSE_FRAMES, BOMB_COLORS),
 ];
 
 describe.each(SPRITES)("%s sprite", (_name, rows, palette) => {
