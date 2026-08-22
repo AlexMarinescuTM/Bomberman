@@ -1,0 +1,27 @@
+name: Test
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    # A PR targeting dev is checked against dev's current state; a PR
+    # targeting main is checked against main's -- so a dev -> main promotion
+    # PR runs the suite against exactly what would land on main if merged.
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
