@@ -1,77 +1,34 @@
-# React + TypeScript + Vite
+# Bomberman
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based Bomberman clone built with React, TypeScript, and Vite. Bomb your way through a procedurally generated grid, break crates for power-ups, and clear the enemies before they catch you.
 
-Currently, two official plugins are available:
+## Playing it
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Requires [Node.js](https://nodejs.org/) 22 or later.
 
-## React Compiler
-
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+git clone https://github.com/AlexMarinescuTM/Bomberman.git
+cd Bomberman
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+`npm run dev` starts the Vite dev server and prints a local URL (typically `http://localhost:5173`) — open it in a browser to play.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+**Controls:** Arrow keys / WASD to move, Space to place a bomb.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Other commands
 
-```
+| Command | What it does |
+|---|---|
+| `npm run build` | Type-checks the project and builds a production bundle to `dist/` |
+| `npm run preview` | Serves that production build locally |
+| `npm test` | Runs the test suite (Vitest) |
+| `npm run lint` | Runs ESLint |
+
+## Branches
+
+- **`dev`** — active development happens here. Open pull requests against `dev`.
+- **`main`** — kept in sync with `dev` and promoted via pull request once changes are ready.
+
+Every push to `dev`, and every pull request into `dev` or `main`, runs the test suite automatically via GitHub Actions (see [`.github/workflows/test.yml`](.github/workflows/test.yml)).
